@@ -1,10 +1,17 @@
 package config
 
 import (
+	"bytes"
+	"crypto/ed25519"
+	"encoding/base64"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/protonspy/dc-streaming-p2p/internal/auth"
 )
 
 // env turns a map into a Getenv, with the prefix already applied to the keys so a
@@ -13,10 +20,19 @@ func env(vars map[string]string) Getenv {
 	return func(key string) string { return vars[key] }
 }
 
+// testSigningKey is a seed of the right length, base64, as an operator would
+// produce with `openssl rand -base64 32`.
+var testSigningKey = base64.StdEncoding.EncodeToString(bytes.Repeat([]byte("k"), SigningKeySeedLen))
+
+// testClients is one client whose secret is exactly the minimum length.
+var testClients = `[{"client_id":"sdk-web","peer_id":"peer-001","secret":"` +
+	strings.Repeat("s", auth.MinSecretLen) + `"}]`
+
 // valid is the smallest environment that loads, and the base every case edits.
 func valid() map[string]string {
 	return map[string]string{
-		"CENTRAL_TOKEN_SIGNING_KEY": strings.Repeat("k", minSigningKeyLen),
+		"CENTRAL_TOKEN_SIGNING_KEY": testSigningKey,
+		"CENTRAL_CLIENTS":           testClients,
 	}
 }
 
@@ -92,9 +108,50 @@ func TestLoadRejects(t *testing.T) {
 			want: "TOKEN_SIGNING_KEY",
 		},
 		{
-			name: "a signing key shorter than the minimum",
-			edit: func(v map[string]string) { v["CENTRAL_TOKEN_SIGNING_KEY"] = "too-short" },
-			want: "TOKEN_SIGNING_KEY",
+			name: "a signing key that is not base64",
+			edit: func(v map[string]string) { v["CENTRAL_TOKEN_SIGNING_KEY"] = "not base64!" },
+			want: "not base64",
+		},
+		{
+			name: "a signing key of the wrong length",
+			edit: func(v map[string]string) {
+				v["CENTRAL_TOKEN_SIGNING_KEY"] = base64.StdEncoding.EncodeToString([]byte("too short"))
+			},
+			want: "want 32",
+		},
+		{
+			name: "no clients",
+			edit: func(v map[string]string) { delete(v, "CENTRAL_CLIENTS") },
+			want: "CLIENTS",
+		},
+		{
+			name: "clients that are not JSON",
+			edit: func(v map[string]string) { v["CENTRAL_CLIENTS"] = "sdk-web:secret" },
+			want: "JSON",
+		},
+		{
+			name: "a client whose secret is too short",
+			edit: func(v map[string]string) {
+				v["CENTRAL_CLIENTS"] = `[{"client_id":"sdk-web","peer_id":"peer-001","secret":"short"}]`
+			},
+			want: "at least 32",
+		},
+		{
+			name: "a client with no peer identifier",
+			edit: func(v map[string]string) {
+				v["CENTRAL_CLIENTS"] = `[{"client_id":"sdk-web","secret":"` + strings.Repeat("s", auth.MinSecretLen) + `"}]`
+			},
+			want: "no peer_id",
+		},
+		{
+			name: "an allowance that is not a number",
+			edit: func(v map[string]string) { v["CENTRAL_AUTH_MAX_FAILURES"] = "many" },
+			want: "AUTH_MAX_FAILURES",
+		},
+		{
+			name: "an allowance of zero, which would refuse everyone",
+			edit: func(v map[string]string) { v["CENTRAL_AUTH_MAX_FAILURES"] = "0" },
+			want: "AUTH_MAX_FAILURES",
 		},
 		{
 			name: "a listen address with no port",
@@ -269,18 +326,76 @@ func TestContainsFold(t *testing.T) {
 	}
 }
 
-func TestStringRedactsTheSigningKey(t *testing.T) {
+func TestStringKeepsTheSigningKeyOut(t *testing.T) {
 	cfg, err := Load(env(valid()))
 	if err != nil {
 		t.Fatalf("Load() error = %v, want nil", err)
 	}
 
 	got := cfg.String()
-	if strings.Contains(got, cfg.TokenSigningKey) {
-		t.Errorf("String() = %q, want the signing key redacted", got)
+	if strings.Contains(got, testSigningKey) || strings.Contains(got, string(cfg.TokenSigningKey)) {
+		t.Errorf("String() = %q, want no key material in it", got)
 	}
-	if !strings.Contains(got, "set(") {
-		t.Errorf("String() = %q, want it to report the key as set", got)
+	if !strings.Contains(got, "signing_key=loaded") {
+		t.Errorf("String() = %q, want it to report the key as loaded", got)
+	}
+}
+
+func TestLoadReadsTheSigningKeyAndClients(t *testing.T) {
+	cfg, err := Load(env(valid()))
+	if err != nil {
+		t.Fatalf("Load() error = %v, want nil", err)
+	}
+
+	if len(cfg.TokenSigningKey) != ed25519.PrivateKeySize {
+		t.Errorf("TokenSigningKey is %d bytes, want %d", len(cfg.TokenSigningKey), ed25519.PrivateKeySize)
+	}
+	if len(cfg.Clients) != 1 || cfg.Clients[0].PeerID != "peer-001" {
+		t.Errorf("Clients = %+v, want the one configured client", cfg.Clients)
+	}
+	if cfg.Issuer == "" || cfg.AuthMaxFailures <= 0 || cfg.AuthFailureWindow <= 0 {
+		t.Errorf("issuer/allowance/window = %q/%d/%s, want defaults filled in",
+			cfg.Issuer, cfg.AuthMaxFailures, cfg.AuthFailureWindow)
+	}
+}
+
+func TestLoadReadsTheSigningKeyAndClientsFromFiles(t *testing.T) {
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, "signing.key")
+	clientsPath := filepath.Join(dir, "clients.json")
+
+	if err := os.WriteFile(keyPath, []byte(testSigningKey+"\n"), 0o600); err != nil {
+		t.Fatalf("write key: %v", err)
+	}
+	if err := os.WriteFile(clientsPath, []byte(testClients), 0o600); err != nil {
+		t.Fatalf("write clients: %v", err)
+	}
+
+	cfg, err := Load(env(map[string]string{
+		"CENTRAL_TOKEN_SIGNING_KEY_FILE": keyPath,
+		"CENTRAL_CLIENTS_FILE":           clientsPath,
+	}))
+	if err != nil {
+		t.Fatalf("Load() error = %v, want nil", err)
+	}
+	if len(cfg.TokenSigningKey) != ed25519.PrivateKeySize || len(cfg.Clients) != 1 {
+		t.Errorf("key = %d bytes, clients = %d, want a loaded key and one client",
+			len(cfg.TokenSigningKey), len(cfg.Clients))
+	}
+}
+
+func TestLoadReportsAFileItCannotRead(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "absent")
+
+	for _, key := range []string{"CENTRAL_TOKEN_SIGNING_KEY_FILE", "CENTRAL_CLIENTS_FILE"} {
+		t.Run(key, func(t *testing.T) {
+			vars := valid()
+			vars[key] = missing
+
+			if _, err := Load(env(vars)); err == nil {
+				t.Errorf("Load() error = nil with %s pointing at nothing, want an error", key)
+			}
+		})
 	}
 }
 
@@ -307,5 +422,18 @@ func TestRelayConfigured(t *testing.T) {
 				t.Errorf("RelayConfigured() = %t, want %t", got, c.want)
 			}
 		})
+	}
+}
+
+func TestIssuerFallsBackWhenBlank(t *testing.T) {
+	vars := valid()
+	vars["CENTRAL_ISSUER"] = "   "
+
+	cfg, err := Load(env(vars))
+	if err != nil {
+		t.Fatalf("Load() error = %v, want nil — a blank issuer takes the default", err)
+	}
+	if cfg.Issuer != "dc-streaming-p2p" {
+		t.Errorf("Issuer = %q, want the default", cfg.Issuer)
 	}
 }

@@ -7,14 +7,14 @@ ci: wait
 
 ## 1 · The auth package
 
-- [ ] 1.1 (Unit) Add the client store: configured clients, hashed secrets, constant-time comparison, and a fixed-cost path for an unknown identifier — R4.1, R4.2
-- [ ] 1.2 (Unit) Validate the client configuration at startup and refuse to start on a missing field, a short secret, or an empty list — R4.3, R4.4
+- [x] 1.1 (Unit) Add the client store: configured clients, hashed secrets, constant-time comparison, and a fixed-cost path for an unknown identifier — R4.1, R4.2
+- [x] 1.2 (Unit) Validate the client configuration at startup and refuse to start on a missing field, a short secret, or an empty list — R4.3, R4.4
   _Depends 1.1_
-- [ ] 1.3 (TDD) Issue Ed25519-signed tokens carrying the peer identifier, the issuer, and a bounded lifetime — R1.2, R1.3
+- [x] 1.3 (TDD) Issue Ed25519-signed tokens carrying the peer identifier, the issuer, and a bounded lifetime — R1.2, R1.3
   _Depends 1.1_
-- [ ] 1.4 (TDD) Verify a token: signature, expiry, and refusal of any algorithm other than the one issued — R2.1, R2.2, R2.3, R2.5
+- [x] 1.4 (TDD) Verify a token: signature, expiry, and refusal of any algorithm other than the one issued — R2.1, R2.2, R2.3, R2.5
   _Depends 1.3_
-- [ ] 1.5 (TDD) Refuse a client identifier that fails more often than the allowance within the window, correct credentials included — R1.6
+- [x] 1.5 (TDD) Refuse a client identifier that fails more often than the allowance within the window, correct credentials included — R1.6
   _Depends 1.1_
 
 ## 2 · The HTTP surface

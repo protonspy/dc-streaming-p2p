@@ -15,8 +15,20 @@ services:
       CENTRAL_LISTEN_ADDR: ":8080"
       # Development values. Anything real comes from the deployment's own secret
       # store: this file is committed and everything in it is public.
-      CENTRAL_TOKEN_SIGNING_KEY: development-signing-key-32-characters
+      #
+      # The signing key is a base64 Ed25519 seed — `openssl rand -base64 32`
+      # prints one. The public half is served at /.well-known/jwks.json and is
+      # what a client pins.
+      CENTRAL_TOKEN_SIGNING_KEY: ZGV2ZWxvcG1lbnQtb25seS1zaWduaW5nLXNlZWQtMzI=
       CENTRAL_TOKEN_TTL: "1h"
+      CENTRAL_ISSUER: dc-streaming-p2p-dev
+      CENTRAL_CLIENTS: >-
+        [{"client_id":"sdk-web","peer_id":"peer-001",
+        "secret":"development-secret-at-least-32-chars"},
+        {"client_id":"sdk-web-2","peer_id":"peer-002",
+        "secret":"development-secret-at-least-32-char2"}]
+      CENTRAL_AUTH_MAX_FAILURES: "10"
+      CENTRAL_AUTH_FAILURE_WINDOW: "5m"
       CENTRAL_HEARTBEAT_INTERVAL: "15s"
       CENTRAL_SUSPECT_AFTER: "30s"
       CENTRAL_OFFLINE_AFTER: "60s"

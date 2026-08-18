@@ -4,13 +4,19 @@
 package config
 
 import (
+	"crypto/ed25519"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/protonspy/dc-streaming-p2p/internal/auth"
 )
 
 // Prefix is what every variable this package reads starts with.
@@ -26,10 +32,20 @@ type Config struct {
 	// connection. Empty means every origin, which is only ever right in development.
 	AllowedOrigins []string
 
-	// TokenSigningKey signs the tokens issued by POST /auth.
-	TokenSigningKey string
+	// TokenSigningKey signs the tokens issued by POST /auth. Only this server
+	// holds it; what it publishes is the public half.
+	TokenSigningKey ed25519.PrivateKey
 	// TokenTTL is how long an issued token stays valid.
 	TokenTTL time.Duration
+	// Issuer names this server in the tokens it issues.
+	Issuer string
+	// Clients are the credentials that may authenticate.
+	Clients []auth.ClientConfig
+	// AuthMaxFailures is how many times one client identifier may fail inside
+	// AuthFailureWindow before it is refused outright.
+	AuthMaxFailures int
+	// AuthFailureWindow is the window those failures are counted in.
+	AuthFailureWindow time.Duration
 
 	// HeartbeatInterval is how often a peer is expected to report in.
 	HeartbeatInterval time.Duration
@@ -54,9 +70,9 @@ type Config struct {
 	TURNCredentialTTL time.Duration
 }
 
-// minSigningKeyLen is the shortest signing key this server accepts. A key shorter
-// than the hash it feeds adds nothing to the security of the signature.
-const minSigningKeyLen = 32
+// SigningKeySeedLen is the length of the seed a signing key is configured as:
+// 32 random bytes, base64, which is what `openssl rand -base64 32` prints.
+const SigningKeySeedLen = ed25519.SeedSize
 
 // Getenv reads one variable. It is os.Getenv in production and a map in a test.
 type Getenv func(string) string
@@ -89,12 +105,34 @@ func Load(getenv Getenv) (Config, error) {
 		return d
 	}
 
+	clients, clientProblems := loadClients(get("CLIENTS", ""), get("CLIENTS_FILE", ""))
+	problems = append(problems, clientProblems...)
+
+	signingKey, keyProblem := loadSigningKey(get("TOKEN_SIGNING_KEY", ""), get("TOKEN_SIGNING_KEY_FILE", ""))
+	if keyProblem != nil {
+		problems = append(problems, keyProblem)
+	}
+
+	whole := func(key, fallback string) int {
+		raw := get(key, fallback)
+		n, err := strconv.Atoi(raw)
+		if err != nil || n <= 0 {
+			problems = append(problems, fmt.Errorf("%s%s: %q is not a whole number above zero", Prefix, key, raw))
+			return 0
+		}
+		return n
+	}
+
 	cfg := Config{
 		ListenAddr:         get("LISTEN_ADDR", ":8080"),
 		ShutdownTimeout:    duration("SHUTDOWN_TIMEOUT", "15s"),
 		AllowedOrigins:     splitList(get("ALLOWED_ORIGINS", "")),
-		TokenSigningKey:    get("TOKEN_SIGNING_KEY", ""),
+		TokenSigningKey:    signingKey,
 		TokenTTL:           duration("TOKEN_TTL", "1h"),
+		Issuer:             get("ISSUER", "dc-streaming-p2p"),
+		Clients:            clients,
+		AuthMaxFailures:    whole("AUTH_MAX_FAILURES", "10"),
+		AuthFailureWindow:  duration("AUTH_FAILURE_WINDOW", "5m"),
 		HeartbeatInterval:  duration("HEARTBEAT_INTERVAL", "15s"),
 		SuspectAfter:       duration("SUSPECT_AFTER", "30s"),
 		OfflineAfter:       duration("OFFLINE_AFTER", "60s"),
@@ -119,9 +157,11 @@ func (c Config) validate() []error {
 	if _, _, err := net.SplitHostPort(c.ListenAddr); err != nil {
 		problems = append(problems, fmt.Errorf("%sLISTEN_ADDR: %q is not host:port", Prefix, c.ListenAddr))
 	}
-	if len(c.TokenSigningKey) < minSigningKeyLen {
-		problems = append(problems, fmt.Errorf("%sTOKEN_SIGNING_KEY: needs at least %d characters, has %d",
-			Prefix, minSigningKeyLen, len(c.TokenSigningKey)))
+	if len(c.TokenSigningKey) != ed25519.PrivateKeySize {
+		problems = append(problems, fmt.Errorf("%sTOKEN_SIGNING_KEY: no usable signing key", Prefix))
+	}
+	if strings.TrimSpace(c.Issuer) == "" {
+		problems = append(problems, fmt.Errorf("%sISSUER: empty, and every token has to name who issued it", Prefix))
 	}
 	if c.SuspectAfter > 0 && c.HeartbeatInterval > 0 && c.SuspectAfter <= c.HeartbeatInterval {
 		problems = append(problems, fmt.Errorf("%sSUSPECT_AFTER: %s is not longer than the %s heartbeat interval",
@@ -221,10 +261,20 @@ func containsFold(values []string, want string) bool {
 // leaked signing key.
 func (c Config) String() string {
 	return fmt.Sprintf(
-		"listen=%s token_ttl=%s signing_key=%s heartbeat=%s suspect=%s offline=%s negotiation=%s stun=%d relay=%t turn_credential_ttl=%s",
-		c.ListenAddr, c.TokenTTL, redact(c.TokenSigningKey), c.HeartbeatInterval, c.SuspectAfter,
-		c.OfflineAfter, c.NegotiationTimeout, len(c.STUNURLs), c.RelayConfigured(), c.TURNCredentialTTL,
+		"listen=%s issuer=%s token_ttl=%s signing_key=%s clients=%d heartbeat=%s suspect=%s offline=%s negotiation=%s stun=%d relay=%t turn_credential_ttl=%s",
+		c.ListenAddr, c.Issuer, c.TokenTTL, signingKeyState(c.TokenSigningKey), len(c.Clients), c.HeartbeatInterval,
+		c.SuspectAfter, c.OfflineAfter, c.NegotiationTimeout, len(c.STUNURLs), c.RelayConfigured(), c.TURNCredentialTTL,
 	)
+}
+
+// signingKeyState says whether a key is loaded, and never anything about it. The
+// public half is published deliberately, elsewhere; the private half is not
+// described here even by length.
+func signingKeyState(key ed25519.PrivateKey) string {
+	if len(key) == 0 {
+		return "unset"
+	}
+	return "loaded"
 }
 
 // redact describes a secret without disclosing it.
@@ -233,4 +283,61 @@ func redact(secret string) string {
 		return "unset"
 	}
 	return "set(" + strconv.Itoa(len(secret)) + " chars)"
+}
+
+// loadSigningKey reads the Ed25519 signing key from a base64 seed or from a file
+// holding one. The key is the most valuable thing this process holds, so a file is
+// offered: an environment variable is readable by anything that can list the
+// process, and a file has permissions.
+func loadSigningKey(inline, path string) (ed25519.PrivateKey, error) {
+	raw := inline
+	if path != "" {
+		contents, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("%sTOKEN_SIGNING_KEY_FILE: %w", Prefix, err)
+		}
+		raw = strings.TrimSpace(string(contents))
+	}
+	if raw == "" {
+		return nil, fmt.Errorf("%sTOKEN_SIGNING_KEY: no signing key, and nothing could be issued without one", Prefix)
+	}
+
+	seed, err := base64.StdEncoding.DecodeString(raw)
+	if err != nil {
+		return nil, fmt.Errorf("%sTOKEN_SIGNING_KEY: not base64", Prefix)
+	}
+	if len(seed) != SigningKeySeedLen {
+		return nil, fmt.Errorf("%sTOKEN_SIGNING_KEY: decodes to %d bytes, want %d — `openssl rand -base64 32` prints one",
+			Prefix, len(seed), SigningKeySeedLen)
+	}
+	return ed25519.NewKeyFromSeed(seed), nil
+}
+
+// loadClients reads the configured clients from JSON, inline or from a file. It
+// only parses; whether a client is usable is the auth package's judgement, made
+// when the store is built.
+func loadClients(inline, path string) ([]auth.ClientConfig, []error) {
+	raw := inline
+	if path != "" {
+		contents, err := os.ReadFile(path)
+		if err != nil {
+			return nil, []error{fmt.Errorf("%sCLIENTS_FILE: %w", Prefix, err)}
+		}
+		raw = string(contents)
+	}
+	if strings.TrimSpace(raw) == "" {
+		return nil, []error{fmt.Errorf("%sCLIENTS: no clients configured, so nothing could authenticate", Prefix)}
+	}
+
+	var clients []auth.ClientConfig
+	if err := json.Unmarshal([]byte(raw), &clients); err != nil {
+		return nil, []error{fmt.Errorf("%sCLIENTS: not a JSON array of clients", Prefix)}
+	}
+
+	// Building the store is what validates them, and it reports every problem it
+	// finds rather than the first.
+	if _, err := auth.NewClientStore(clients); err != nil {
+		return nil, []error{fmt.Errorf("%sCLIENTS: %w", Prefix, err)}
+	}
+	return clients, nil
 }

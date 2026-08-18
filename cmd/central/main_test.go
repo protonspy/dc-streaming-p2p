@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"io"
 	"log/slog"
 	"net/http"
@@ -19,8 +20,10 @@ import (
 // operating system picks.
 func testEnv(overrides map[string]string) func(string) string {
 	vars := map[string]string{
-		"CENTRAL_TOKEN_SIGNING_KEY": strings.Repeat("k", 32),
-		"CENTRAL_LISTEN_ADDR":       "127.0.0.1:0",
+		"CENTRAL_TOKEN_SIGNING_KEY": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte("k"), 32)),
+		"CENTRAL_CLIENTS": `[{"client_id":"sdk-web","peer_id":"peer-001","secret":"` +
+			strings.Repeat("s", 32) + `"}]`,
+		"CENTRAL_LISTEN_ADDR": "127.0.0.1:0",
 	}
 	for k, v := range overrides {
 		vars[k] = v
@@ -62,7 +65,7 @@ func TestRunRejectsAnUnknownLogFormat(t *testing.T) {
 
 func TestRunReportsABadConfiguration(t *testing.T) {
 	var out, errOut bytes.Buffer
-	env := testEnv(map[string]string{"CENTRAL_TOKEN_SIGNING_KEY": "too-short"})
+	env := testEnv(map[string]string{"CENTRAL_TOKEN_SIGNING_KEY": "not base64!"})
 
 	err := run(context.Background(), nil, env, &out, &errOut)
 	if err == nil {
