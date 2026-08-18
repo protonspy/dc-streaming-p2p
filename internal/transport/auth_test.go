@@ -478,3 +478,18 @@ func mustKey(t *testing.T) ed25519.PrivateKey {
 	}
 	return key
 }
+
+func TestAuthRefusesAnOverlongClientIdentifier(t *testing.T) {
+	f := newAuthFixture(t, 10)
+
+	long := strings.Repeat("a", maxClientIDLen+1)
+	rec := f.post(t, credentials(long, testSecret))
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d — an identifier that long is not one anybody configured", rec.Code, http.StatusBadRequest)
+	}
+	if f.limiter.Tracked() != 0 {
+		t.Errorf("the limiter is tracking %d identifiers, want 0 — an overlong identifier must not become a map key",
+			f.limiter.Tracked())
+	}
+}

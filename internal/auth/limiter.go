@@ -11,6 +11,13 @@ import (
 // never sweeping is a map that grows with every identifier anyone ever guessed.
 const sweepThreshold = 1024
 
+// maxTracked is the hard ceiling on identifiers held at once. Sweeping alone does
+// not bound this: under a flood of identifiers nobody has ever configured, every
+// record is fresh and nothing is expired, so the map grows with the traffic. Past
+// this ceiling the oldest record is evicted, which costs an attacker their own
+// earliest entries and costs a real client, at worst, a forgotten count.
+const maxTracked = 8192
+
 // AttemptLimiter counts failed authentications per client identifier and refuses
 // an identifier that has spent its allowance inside the window — correct
 // credentials included, because a limit that lifts for the right secret tells an
@@ -29,6 +36,13 @@ type AttemptLimiter struct {
 	allowance int
 	window    time.Duration
 	failures  map[string]failureRecord
+	// order is the insertion order of the keys in failures, so eviction is a pop
+	// from the front rather than a scan for the oldest.
+	order []string
+	// lastSweep bounds how often the expired records are cleared. Without it, a
+	// flood keeps the map above the threshold and every write pays for a full
+	// scan, which turns linear traffic into quadratic work.
+	lastSweep time.Time
 	now       func() time.Time
 }
 
@@ -82,9 +96,27 @@ func (l *AttemptLimiter) Failed(id string) {
 	}
 	record.count++
 	l.failures[id] = record
+	if !tracked {
+		l.order = append(l.order, id)
+	}
 
-	if len(l.failures) > sweepThreshold {
+	if len(l.failures) > sweepThreshold && now.Sub(l.lastSweep) >= l.window {
 		l.sweep()
+	}
+	for len(l.failures) > maxTracked {
+		l.evictOldest()
+	}
+}
+
+// evictOldest drops the earliest identifier still tracked. Callers hold the lock.
+func (l *AttemptLimiter) evictOldest() {
+	for len(l.order) > 0 {
+		oldest := l.order[0]
+		l.order = l.order[1:]
+		if _, tracked := l.failures[oldest]; tracked {
+			delete(l.failures, oldest)
+			return
+		}
 	}
 }
 
@@ -94,6 +126,8 @@ func (l *AttemptLimiter) Succeeded(id string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
+	// The key stays in the order slice and is skipped when it comes up for
+	// eviction; removing it from the middle would cost a scan per success.
 	delete(l.failures, id)
 }
 
@@ -111,11 +145,22 @@ func (l *AttemptLimiter) expired(record failureRecord) bool {
 	return l.now().Sub(record.startedAt) > l.window
 }
 
-// sweep drops every record whose window has passed. Callers hold the lock.
+// sweep drops every record whose window has passed, and compacts the eviction
+// order alongside it. Callers hold the lock.
 func (l *AttemptLimiter) sweep() {
+	l.lastSweep = l.now()
+
 	for id, record := range l.failures {
 		if l.expired(record) {
 			delete(l.failures, id)
 		}
 	}
+
+	kept := l.order[:0]
+	for _, id := range l.order {
+		if _, tracked := l.failures[id]; tracked {
+			kept = append(kept, id)
+		}
+	}
+	l.order = kept
 }

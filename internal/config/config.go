@@ -277,14 +277,6 @@ func signingKeyState(key ed25519.PrivateKey) string {
 	return "loaded"
 }
 
-// redact describes a secret without disclosing it.
-func redact(secret string) string {
-	if secret == "" {
-		return "unset"
-	}
-	return "set(" + strconv.Itoa(len(secret)) + " chars)"
-}
-
 // loadSigningKey reads the Ed25519 signing key from a base64 seed or from a file
 // holding one. The key is the most valuable thing this process holds, so a file is
 // offered: an environment variable is readable by anything that can list the

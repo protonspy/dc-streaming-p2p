@@ -153,3 +153,48 @@ func TestLimiterIsSafeUnderConcurrentUse(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestNeverTracksMoreThanTheCeiling(t *testing.T) {
+	limiter, _ := testLimiter(t, 2, time.Minute)
+
+	// Every identifier is fresh, so nothing is ever expired and sweeping alone
+	// would free nothing. This is the flood a caller can produce with no
+	// credential at all.
+	for i := range maxTracked * 2 {
+		limiter.Failed("guess-" + strconv.Itoa(i))
+	}
+
+	if got := limiter.Tracked(); got > maxTracked {
+		t.Errorf("Tracked() = %d, want no more than %d", got, maxTracked)
+	}
+}
+
+func TestEvictionDropsTheOldestFirst(t *testing.T) {
+	limiter, _ := testLimiter(t, 2, time.Minute)
+
+	limiter.Failed("first")
+	for i := range maxTracked + 1 {
+		limiter.Failed("later-" + strconv.Itoa(i))
+	}
+
+	// "first" was the earliest tracked, so it is the one that went.
+	if !limiter.Allowed("first") {
+		t.Error("Allowed(\"first\") = false, want true — the earliest entry is what eviction takes")
+	}
+}
+
+func TestSweepsAtMostOncePerWindow(t *testing.T) {
+	limiter, _ := testLimiter(t, 2, time.Minute)
+
+	for i := range sweepThreshold + 100 {
+		limiter.Failed("guess-" + strconv.Itoa(i))
+	}
+	before := limiter.Tracked()
+
+	// Past the threshold, but inside the window: nothing is expired and the
+	// records stay, without a scan on every write.
+	limiter.Failed("one-more")
+	if limiter.Tracked() < before {
+		t.Errorf("Tracked() = %d, was %d — nothing had expired, so nothing should have been dropped", limiter.Tracked(), before)
+	}
+}

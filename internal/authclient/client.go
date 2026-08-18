@@ -55,6 +55,9 @@ type Client struct {
 	expected ed25519.PublicKey
 	http     *http.Client
 
+	// allowInsecure permits a plain http:// base URL. Off unless asked for.
+	allowInsecure bool
+
 	mu     sync.Mutex
 	pinned ed25519.PublicKey
 }
@@ -69,6 +72,16 @@ func WithHTTPClient(hc *http.Client) Option {
 		if hc != nil {
 			c.http = hc
 		}
+	}
+}
+
+// WithInsecureTransport allows a plain http:// server. Pinning the published key
+// defeats a server pretending to be the central one; it does nothing about
+// somebody reading the credential off the wire, and the credential is sent before
+// any token exists. Development and tests are the only honest uses of this.
+func WithInsecureTransport() Option {
+	return func(c *Client) {
+		c.allowInsecure = true
 	}
 }
 
@@ -92,6 +105,12 @@ func New(baseURL string, expected ed25519.PublicKey, opts ...Option) (*Client, e
 	}
 	for _, opt := range opts {
 		opt(client)
+	}
+
+	if parsed.Scheme != "https" && !client.allowInsecure {
+		return nil, fmt.Errorf(
+			"authclient: %q is not https, and the credential is sent before there is a token to protect it — pass WithInsecureTransport to allow it anyway",
+			trimmed)
 	}
 	return client, nil
 }

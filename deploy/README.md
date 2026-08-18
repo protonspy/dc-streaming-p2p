@@ -29,6 +29,12 @@ themselves come from `CENTRAL_CLIENTS` as JSON, or from a file named by
 `CENTRAL_CLIENTS_FILE` — the file is the better one for anything real, because an
 environment variable is readable by anything that can list the process.
 
+This stack serves plain HTTP, which is why the Go client needs
+`WithInsecureTransport()` to talk to it. A deployment terminates TLS in front of the
+server: pinning the published key stops another server from impersonating this one,
+and does nothing at all about somebody reading the credential off the wire — and the
+credential is sent before there is any token to protect it.
+
 Every secret in these files is a development value, committed on purpose so the
 stack starts with no setup. A deployment takes `CENTRAL_TOKEN_SIGNING_KEY` and
 `CENTRAL_TURN_SECRET` from its own secret store, and the TURN secret has to be the

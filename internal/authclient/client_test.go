@@ -133,7 +133,7 @@ func TestAuthenticateAgainstTheExpectedServer(t *testing.T) {
 	expected, _ := mustKeys(t)
 	central := newFakeCentral(t, expected)
 
-	client, err := New(central.server.URL, expected, WithHTTPClient(central.server.Client()))
+	client, err := New(central.server.URL, expected, WithHTTPClient(central.server.Client()), WithInsecureTransport())
 	if err != nil {
 		t.Fatalf("New() error = %v, want nil", err)
 	}
@@ -156,7 +156,7 @@ func TestAuthenticateSendsNothingToAServerWithTheWrongKey(t *testing.T) {
 	expected, other := mustKeys(t)
 	central := newFakeCentral(t, other)
 
-	client, err := New(central.server.URL, expected, WithHTTPClient(central.server.Client()))
+	client, err := New(central.server.URL, expected, WithHTTPClient(central.server.Client()), WithInsecureTransport())
 	if err != nil {
 		t.Fatalf("New() error = %v, want nil", err)
 	}
@@ -181,7 +181,7 @@ func TestVerifyServerKeyAcceptsAKeySetInRotation(t *testing.T) {
 	central := newFakeCentral(t, other)
 	central.publish(keySetFor(other, expected))
 
-	client, err := New(central.server.URL, expected, WithHTTPClient(central.server.Client()))
+	client, err := New(central.server.URL, expected, WithHTTPClient(central.server.Client()), WithInsecureTransport())
 	if err != nil {
 		t.Fatalf("New() error = %v, want nil", err)
 	}
@@ -195,7 +195,7 @@ func TestVerifyServerKeyIsAskedOnce(t *testing.T) {
 	expected, _ := mustKeys(t)
 	central := newFakeCentral(t, expected)
 
-	client, err := New(central.server.URL, expected, WithHTTPClient(central.server.Client()))
+	client, err := New(central.server.URL, expected, WithHTTPClient(central.server.Client()), WithInsecureTransport())
 	if err != nil {
 		t.Fatalf("New() error = %v, want nil", err)
 	}
@@ -236,7 +236,7 @@ func TestVerifyServerKeyRefuses(t *testing.T) {
 			central := newFakeCentral(t, expected)
 			central.publish(c.keySet)
 
-			client, err := New(central.server.URL, expected, WithHTTPClient(central.server.Client()))
+			client, err := New(central.server.URL, expected, WithHTTPClient(central.server.Client()), WithInsecureTransport())
 			if err != nil {
 				t.Fatalf("New() error = %v, want nil", err)
 			}
@@ -253,7 +253,7 @@ func TestAuthenticateReportsARefusal(t *testing.T) {
 	central := newFakeCentral(t, expected)
 	central.refuse(http.StatusUnauthorized)
 
-	client, err := New(central.server.URL, expected, WithHTTPClient(central.server.Client()))
+	client, err := New(central.server.URL, expected, WithHTTPClient(central.server.Client()), WithInsecureTransport())
 	if err != nil {
 		t.Fatalf("New() error = %v, want nil", err)
 	}
@@ -291,7 +291,7 @@ func TestAuthenticateHonoursACancelledContext(t *testing.T) {
 	expected, _ := mustKeys(t)
 	central := newFakeCentral(t, expected)
 
-	client, err := New(central.server.URL, expected, WithHTTPClient(central.server.Client()))
+	client, err := New(central.server.URL, expected, WithHTTPClient(central.server.Client()), WithInsecureTransport())
 	if err != nil {
 		t.Fatalf("New() error = %v, want nil", err)
 	}
@@ -301,5 +301,19 @@ func TestAuthenticateHonoursACancelledContext(t *testing.T) {
 
 	if _, err := client.Authenticate(ctx, "sdk-web", "secret"); err == nil {
 		t.Error("Authenticate() error = nil with a cancelled context, want an error")
+	}
+}
+
+func TestNewRefusesPlainHTTPUnlessAsked(t *testing.T) {
+	expected, _ := mustKeys(t)
+
+	if _, err := New("http://central.example", expected); err == nil {
+		t.Error("New() error = nil for an http:// server, want a refusal — the credential goes out before any token exists")
+	}
+	if _, err := New("http://central.example", expected, WithInsecureTransport()); err != nil {
+		t.Errorf("New() error = %v with WithInsecureTransport, want nil", err)
+	}
+	if _, err := New("https://central.example", expected); err != nil {
+		t.Errorf("New() error = %v for an https:// server, want nil", err)
 	}
 }

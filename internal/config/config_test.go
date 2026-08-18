@@ -399,12 +399,6 @@ func TestLoadReportsAFileItCannotRead(t *testing.T) {
 	}
 }
 
-func TestRedactAnUnsetSecret(t *testing.T) {
-	if got := redact(""); got != "unset" {
-		t.Errorf("redact(\"\") = %q, want %q", got, "unset")
-	}
-}
-
 func TestRelayConfigured(t *testing.T) {
 	cases := []struct {
 		name string

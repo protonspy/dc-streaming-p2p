@@ -19,6 +19,11 @@ import (
 // hundred bytes; anything larger is not one.
 const maxCredentialBody = 4 << 10
 
+// maxClientIDLen bounds the identifier before it is used as a key anywhere. An
+// identifier is a name an operator configured, so it is short; leaving it as long
+// as the body allows lets a caller choose kilobytes of map key per request.
+const maxClientIDLen = 128
+
 // The error codes this surface answers with. Every credential failure is
 // invalid_client, whatever was actually wrong with it — see R1.4. The two token
 // codes are deliberately distinct, because one means authenticate again and the
@@ -78,7 +83,7 @@ func Auth(deps AuthDeps) http.Handler {
 		}
 
 		clientID := strings.TrimSpace(credentials.ClientID)
-		if clientID == "" || credentials.ClientSecret == "" {
+		if clientID == "" || len(clientID) > maxClientIDLen || credentials.ClientSecret == "" {
 			writeError(w, http.StatusBadRequest, codeInvalidRequest)
 			return
 		}
