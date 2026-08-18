@@ -734,3 +734,63 @@ func TestReapDoesNotLeaveTheEndedListGrowing(t *testing.T) {
 		t.Errorf("the ended list holds %d identifiers the store no longer has", len(store.ended))
 	}
 }
+
+func TestClosePeerDoesNotRelabelATimedOutSession(t *testing.T) {
+	store, clock := testStore(t, Options{NegotiationTimeout: time.Minute})
+
+	opened, err := store.Open("peer-001", "peer-002")
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+
+	// Past the timeout, but nothing has read, reported or reaped it yet: the
+	// stored state still says negotiating.
+	*clock = clock.Add(90 * time.Second)
+
+	if closed := store.ClosePeer("peer-001"); closed != 0 {
+		t.Errorf("ClosePeer() closed %d, want 0 — the session had already failed", closed)
+	}
+
+	held, err := store.Get(opened.ID, "peer-001")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if held.State != Failed {
+		t.Errorf("State = %q, want %q — a call that never connected did not end because somebody hung up",
+			held.State, Failed)
+	}
+	if !held.ChangedAt.Equal(opened.OpenedAt.Add(time.Minute)) {
+		t.Errorf("ChangedAt = %s, want the moment it timed out", held.ChangedAt)
+	}
+}
+
+func TestForgettingOneSessionLeavesThePairsNewOneAlone(t *testing.T) {
+	store, clock := testStore(t, Options{NegotiationTimeout: time.Hour, Retention: 5 * time.Minute})
+
+	first, err := store.Open("peer-001", "peer-002")
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := store.Report(first.ID, "peer-001", Closed, PathUnknown); err != nil {
+		t.Fatalf("Report() error = %v", err)
+	}
+
+	// The same pair calls again while the closed one is still inside its
+	// retention, so both records exist under the one pair key.
+	second, err := store.Open("peer-001", "peer-002")
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+
+	*clock = clock.Add(6 * time.Minute)
+	store.Reap()
+
+	again, err := store.Open("peer-002", "peer-001")
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if again.ID != second.ID {
+		t.Errorf("Open() = %q, want the live session %q — forgetting the old record took the live one's place in the pair index",
+			again.ID, second.ID)
+	}
+}

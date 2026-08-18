@@ -362,9 +362,18 @@ func (s *Store) ClosePeer(peerID string) int {
 	var closed int
 
 	for id, held := range s.sessions {
-		if !held.Has(peerID) || !held.Live() {
+		if !held.Has(peerID) {
 			continue
 		}
+		// Settle first. A session that has already passed the negotiation timeout
+		// failed at that moment, and closing it here would relabel a failure as a
+		// hang-up — the peer would read that its call was ended rather than that
+		// it never connected.
+		held = s.settleLocked(held, now)
+		if !held.Live() {
+			continue
+		}
+
 		held.State = Closed
 		held.ChangedAt = now
 		s.sessions[id] = held
