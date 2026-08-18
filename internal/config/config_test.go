@@ -154,6 +154,16 @@ func TestLoadRejects(t *testing.T) {
 			want: "AUTH_MAX_FAILURES",
 		},
 		{
+			name: "a peer ceiling that is not positive",
+			edit: func(v map[string]string) { v["CENTRAL_MAX_PEERS"] = "-1" },
+			want: "MAX_PEERS",
+		},
+		{
+			name: "an expiry interval of zero",
+			edit: func(v map[string]string) { v["CENTRAL_EXPIRY_INTERVAL"] = "0s" },
+			want: "EXPIRY_INTERVAL",
+		},
+		{
 			name: "a listen address with no port",
 			edit: func(v map[string]string) { v["CENTRAL_LISTEN_ADDR"] = "localhost" },
 			want: "LISTEN_ADDR",
