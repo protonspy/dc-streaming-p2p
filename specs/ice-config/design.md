@@ -51,6 +51,12 @@ without the relay knowing anything else about it.
 
 ## Risks
 
+A peer identifier carrying the separator cannot be signed into a username the relay
+reads correctly, so this package refuses it. That refusal is a backstop rather than
+the boundary: the identifier is checked where it is configured — `specs/auth-tokens/`
+R4.5 — so the failure is a server that will not start rather than one peer receiving
+a 500 nobody can act on.
+
 The credential outlives the answer that carried it, by exactly the configured
 lifetime. A call that starts near the end of that window can outlast its own
 credential, which is why `expires_at` is answered — the SDK is expected to ask for
