@@ -1,40 +1,82 @@
+---
+autonomy: auto
+ci: wait
+---
+
 # Peer registry — design
-
-<!-- The design must fit the decision being made. Every heading below except
-     "What changes" is OPTIONAL: delete the ones this change does not decide.
-
-     A heading filled with "N/A", or with prose written to satisfy the heading, is
-     worse than an absent heading — the next session reads invented architecture as
-     a decision somebody made, and honors it. Filler becomes binding.
-
-     Delete this comment too. -->
 
 ## What changes
 
-Serves R1.1.
+Serves R1.1 through R4.2.
 
-<!-- Required. What changes, where, and why. For a change that decides nothing
-     structural, this section is the whole design and that is the correct outcome.
+A new package `internal/registry` holding the peer records and the state machine
+over them, and nothing else: no HTTP, no authentication, no timers of its own beyond
+the one that expires records.
 
-     Keep the "Serves" line above and make it real: the design has to name the
-     requirements it answers, or the trace from what to how is unreadable — and
-     `scc spec validate` says so. -->
+`internal/transport` gains four handlers behind `RequireToken` — register,
+deregister, heartbeat, and lookup — which is what finally mounts the middleware
+built in `specs/auth-tokens/`. The health endpoint's peer counter, wired to zero
+since the foundation, is connected here.
 
-## Boundaries and contracts <!-- optional -->
+## Boundaries and contracts
 
-<!-- Only if this change moves a boundary or an external contract, and only for the
-     parts that actually move. -->
+| Route | What it does |
+|---|---|
+| `POST /peers` | registers the caller; answers the heartbeat interval |
+| `DELETE /peers` | deregisters the caller |
+| `POST /peers/heartbeat` | keeps the caller online |
+| `GET /peers/{id}` | reports one peer's state and when it was last seen |
 
-## Data <!-- optional -->
+Every one of them takes the acting peer identifier from the verified token. The
+route carries an identifier only where a peer is being *read*, never where one is
+being written: a peer can register itself and nothing else, which is R1.2 and is the
+reason there is no `POST /peers/{id}`.
 
-<!-- Only if a data shape changes. -->
+`GET /peers/{id}` answers `404` with the same body whether the peer was never
+registered or has been removed. Distinguishing them would let a caller learn who
+used to be here, and there is no reason a peer needs to know.
 
-## Alternatives considered <!-- optional -->
+A heartbeat from a peer that was removed answers `409` with `registration_required`,
+which is distinct from `404` on purpose: the peer is being told what to do about it,
+and it is the one case where a caller learns something about its own record.
 
-<!-- Only where there were real alternatives with trade-offs. Say which won and why.
-     If the decision is hard to reverse, write an ADR under docs/adr/ and cite it
-     here instead of arguing it twice. -->
+## Data
 
-## Risks <!-- optional -->
+```
+peer identifier → { state, registered at, last seen }
+```
 
-<!-- What could go wrong that the task list does not already cover. -->
+State is derived, never stored: a record's state is a function of how long it has
+been since it was last seen, compared against the configured suspect and offline
+windows. Storing it would mean two records of one fact, and a stored state goes
+stale between the moment it changes and the moment something notices.
+
+Online → suspect → gone, and any report in returns it to online. Suspect is not a
+refusal: the registry still answers for a suspect peer, because a peer that missed
+one heartbeat is far more likely to be there than not, and the caller that tries it
+will find out faster than the registry can.
+
+Expiry runs on a ticker in the process rather than only when a record is read, so a
+peer that nobody asks about still leaves — R4.2. A read that finds an expired record
+treats it as gone regardless, so the ticker's interval bounds the memory rather than
+the correctness.
+
+## Alternatives considered
+
+**Expiring only on read** is simpler and needs no goroutine, and it was rejected
+because the registry's whole purpose is answering *who is here*: a record nobody
+reads is exactly the one that should not be counted, and the health endpoint reports
+counts nobody read.
+
+**Storing the state and updating it on a schedule** was rejected for the reason
+above: two records of one fact, and the copy is the one that goes stale.
+
+## Risks
+
+The ticker and a request can touch the same record, so every path through the store
+takes the lock; the tests run the concurrent case rather than reasoning about it.
+
+The bound in R4.1 refuses a new registration when the registry is full, which means
+a flood of registrations from valid clients can keep a legitimate peer out. That is
+deliberate: evicting an online peer to admit a new one would drop a working call, and
+the failure that matters more is the silent one.
