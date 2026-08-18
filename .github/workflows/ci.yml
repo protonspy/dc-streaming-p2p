@@ -53,9 +53,12 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - uses: golangci/golangci-lint-action@v6
-        with:
-          version: latest
+      # Built from source with this repository's own toolchain rather than
+      # installed as a prebuilt binary: the released binaries are built with an
+      # older Go than go.mod targets, and golangci-lint refuses to run in that
+      # direction. Slower, and it is the only version that can read this config.
+      - name: golangci-lint
+        run: go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.3.0 run ./...
 
   artifacts:
     name: validate
