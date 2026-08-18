@@ -1,6 +1,8 @@
 ---
 autonomy: auto
 ci: wait
+status: approved
+checksum: 1fa709ae10683b61741b9043ba818dee38a7ef1f0f9d7dbb5a0b421074e343aa
 ---
 
 # P2P federation
