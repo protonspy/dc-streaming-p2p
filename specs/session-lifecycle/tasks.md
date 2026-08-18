@@ -30,3 +30,12 @@ ci: wait
   _Depends 1.2_
 - [x] 2.4 (Unit) Wire the counts into health, the timeout sweep into the server's lifetime, and the registry's expiry into closing sessions — R2.5, R2.6, R3.3
   _Depends 1.4, 1.5, 1.7_
+
+## 3 · What the review found
+
+- [x] 3.1 (Unit) Keep the live count and the per-peer count rather than scanning, so an unauthenticated health check cannot make everybody wait on the lock — R3.3, R4.1
+  _Reason The security review traced a full scan under the mutex on every open and every health check_
+- [x] 3.2 (Unit) Cap the live sessions one peer may hold, and answer that caller distinctly from the deployment being full — R4.3
+  _Reason The security review found one caller able to take a slot against every peer it can reach_
+- [x] 3.3 (Unit) Bound the retained records and drop the oldest ended first — R4.4
+  _Reason The security review found open-and-close in a loop growing the map for a whole retention window_

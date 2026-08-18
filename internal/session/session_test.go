@@ -577,3 +577,160 @@ func TestStoreIsSafeUnderConcurrentUse(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestOpeningAndClosingInALoopDoesNotGrowWithoutBound(t *testing.T) {
+	store, _ := testStore(t, Options{MaxSessions: 4, Retention: time.Hour})
+
+	// The ceiling is on live sessions and an ended one frees its place at once,
+	// so this loop is refused by nothing. What it must not do is grow the map for
+	// as long as the retention lasts.
+	for i := range 500 {
+		opened, err := store.Open("attacker", "callee-"+strconv.Itoa(i))
+		if err != nil {
+			t.Fatalf("Open() error = %v on call %d", err, i)
+		}
+		if _, err := store.Report(opened.ID, "attacker", Closed, PathUnknown); err != nil {
+			t.Fatalf("Report() error = %v", err)
+		}
+	}
+
+	if held := store.Held(); held > 4*retainedPerLive {
+		t.Errorf("Held() = %d after 500 open-and-close rounds, want no more than %d",
+			held, 4*retainedPerLive)
+	}
+	if store.Count() != 0 {
+		t.Errorf("Count() = %d, want 0 — every session was closed", store.Count())
+	}
+}
+
+func TestOnePeerCannotHoldEverySession(t *testing.T) {
+	store, _ := testStore(t, Options{MaxSessions: 100, MaxSessionsPerPeer: 3})
+
+	for i := range 3 {
+		if _, err := store.Open("greedy", "callee-"+strconv.Itoa(i)); err != nil {
+			t.Fatalf("Open() error = %v on session %d", err, i)
+		}
+	}
+
+	if _, err := store.Open("greedy", "callee-4"); !errors.Is(err, ErrTooManyForPeer) {
+		t.Errorf("Open() error = %v, want ErrTooManyForPeer", err)
+	}
+
+	// Another peer is unaffected: the cap is per peer, not a share of the whole.
+	if _, err := store.Open("somebody-else", "callee-9"); err != nil {
+		t.Errorf("Open() error = %v for an unrelated peer, want nil", err)
+	}
+}
+
+func TestTheCalleeCapCountsToo(t *testing.T) {
+	store, _ := testStore(t, Options{MaxSessions: 100, MaxSessionsPerPeer: 2})
+
+	for i := range 2 {
+		if _, err := store.Open("caller-"+strconv.Itoa(i), "popular"); err != nil {
+			t.Fatalf("Open() error = %v", err)
+		}
+	}
+
+	if _, err := store.Open("caller-9", "popular"); !errors.Is(err, ErrTooManyForPeer) {
+		t.Errorf("Open() error = %v, want ErrTooManyForPeer — a callee has a cap as well", err)
+	}
+}
+
+func TestEndingASessionFreesThePeerCap(t *testing.T) {
+	store, _ := testStore(t, Options{MaxSessions: 100, MaxSessionsPerPeer: 1})
+
+	opened, err := store.Open("peer-001", "peer-002")
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if _, err := store.Open("peer-001", "peer-003"); !errors.Is(err, ErrTooManyForPeer) {
+		t.Fatalf("Open() error = %v, want ErrTooManyForPeer", err)
+	}
+
+	if _, err := store.Report(opened.ID, "peer-001", Closed, PathUnknown); err != nil {
+		t.Fatalf("Report() error = %v", err)
+	}
+
+	if _, err := store.Open("peer-001", "peer-003"); err != nil {
+		t.Errorf("Open() error = %v after the first session closed, want nil", err)
+	}
+}
+
+func TestATimedOutSessionFreesItsPlace(t *testing.T) {
+	store, clock := testStore(t, Options{MaxSessions: 100, MaxSessionsPerPeer: 1, NegotiationTimeout: time.Minute})
+
+	if _, err := store.Open("peer-001", "peer-002"); err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	*clock = clock.Add(90 * time.Second)
+
+	if _, err := store.Open("peer-001", "peer-003"); err != nil {
+		t.Errorf("Open() error = %v, want nil — the timed-out session no longer counts against the peer", err)
+	}
+	if store.Count() != 1 {
+		t.Errorf("Count() = %d, want only the new session", store.Count())
+	}
+}
+
+func TestCountsFollowEveryWayASessionCanEnd(t *testing.T) {
+	ends := map[string]func(*Store, Session) error{
+		"reported closed": func(s *Store, held Session) error {
+			_, err := s.Report(held.ID, held.Caller, Closed, PathUnknown)
+			return err
+		},
+		"reported failed": func(s *Store, held Session) error {
+			_, err := s.Report(held.ID, held.Caller, Failed, PathUnknown)
+			return err
+		},
+		"the peer left the registry": func(s *Store, held Session) error {
+			s.ClosePeer(held.Caller)
+			return nil
+		},
+	}
+
+	for name, end := range ends {
+		t.Run(name, func(t *testing.T) {
+			store, _ := testStore(t, Options{MaxSessionsPerPeer: 1})
+
+			opened, err := store.Open("peer-001", "peer-002")
+			if err != nil {
+				t.Fatalf("Open() error = %v", err)
+			}
+			if err := end(store, opened); err != nil {
+				t.Fatalf("ending the session: %v", err)
+			}
+
+			if store.Count() != 0 {
+				t.Errorf("Count() = %d, want 0", store.Count())
+			}
+			// The per-peer count came down too, or the peer could never call again.
+			if _, err := store.Open("peer-001", "peer-003"); err != nil {
+				t.Errorf("Open() error = %v, want nil once the earlier session ended", err)
+			}
+		})
+	}
+}
+
+func TestReapDoesNotLeaveTheEndedListGrowing(t *testing.T) {
+	store, clock := testStore(t, Options{Retention: time.Minute})
+
+	for i := range 20 {
+		opened, err := store.Open("peer-"+strconv.Itoa(i), "callee-"+strconv.Itoa(i))
+		if err != nil {
+			t.Fatalf("Open() error = %v", err)
+		}
+		if _, err := store.Report(opened.ID, opened.Caller, Closed, PathUnknown); err != nil {
+			t.Fatalf("Report() error = %v", err)
+		}
+	}
+
+	*clock = clock.Add(2 * time.Minute)
+	store.Reap()
+
+	if store.Held() != 0 {
+		t.Errorf("Held() = %d, want 0 past the retention", store.Held())
+	}
+	if len(store.ended) != 0 {
+		t.Errorf("the ended list holds %d identifiers the store no longer has", len(store.ended))
+	}
+}

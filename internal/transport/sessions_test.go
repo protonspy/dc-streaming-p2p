@@ -386,3 +386,21 @@ func TestGetSessionRefusesAMethodItDoesNotServe(t *testing.T) {
 		t.Errorf("PUT = %d, want %d", rec.Code, http.StatusMethodNotAllowed)
 	}
 }
+
+func TestOpenAnswersTheCallerAtItsOwnLimitDistinctly(t *testing.T) {
+	f := newSessionFixture(t, session.Options{
+		MaxSessions:        100,
+		MaxSessionsPerPeer: 1,
+		Peers:              presentPeers{"peer-001": true, "peer-002": true, "peer-003": true},
+	})
+
+	f.open(t, "peer-001", "peer-002")
+
+	rec := f.do(t, http.MethodPost, "/sessions", "peer-001", `{"peer_id":"peer-003"}`)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want %d — this caller is at its own limit, not the deployment", rec.Code, http.StatusTooManyRequests)
+	}
+	if got := decodeError(t, rec); got != codePeerSessions {
+		t.Errorf("error = %q, want %q", got, codePeerSessions)
+	}
+}

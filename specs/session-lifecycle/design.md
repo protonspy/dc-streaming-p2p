@@ -74,6 +74,23 @@ implementation without touching a route. R1.4 is written so that a refusal by po
 is indistinguishable from a peer that does not exist, which is the property that
 survives whatever policy comes later.
 
+## Bounds
+
+Three, all of them because the store is shared and one caller must not be able to
+make everybody else slow:
+
+- **Live count and per-peer index are maintained, never scanned.** The health
+  endpoint is unauthenticated and reads the live count, so a scan there is a
+  stranger making every peer wait on the mutex.
+- **A peer holds at most so many live sessions.** Without it, one caller occupies a
+  slot against every peer it can reach, and none of them agreed to anything. A peer
+  at its cap settles what it is holding first, so a session that quietly timed out
+  does not keep its place — that costs the cap, not the map.
+- **Retained records are bounded.** Ended sessions stay readable for their
+  retention, which is deliberate; growing without limit while a caller opens and
+  closes in a loop is not. Past the bound the oldest ended record is dropped, which
+  costs a pop rather than a search.
+
 ## Risks
 
 Two peers opening a session to each other at the same instant would make two

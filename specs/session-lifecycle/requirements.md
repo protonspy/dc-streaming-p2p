@@ -45,3 +45,5 @@ holds is who, since when, in what state, and over what path.
 
 - **R4.1** The control plane shall hold at most the configured number of sessions, and shall refuse a new one rather than dropping one that is connected.
 - **R4.2** The control plane shall refuse a state a session cannot move to, and shall leave the session as it was.
+- **R4.3** The control plane shall hold at most the configured number of live sessions for any one peer, and shall refuse a further one for that peer while saying that it is the caller and not the deployment that is at its limit.
+- **R4.4** The control plane shall bound how many ended sessions it retains, and shall forget the oldest first rather than growing with what a caller opens and closes.

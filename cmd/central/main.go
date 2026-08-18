@@ -100,6 +100,7 @@ func run(ctx context.Context, args []string, getenv config.Getenv, stdout, stder
 		NegotiationTimeout: cfg.NegotiationTimeout,
 		Retention:          cfg.SessionRetention,
 		MaxSessions:        cfg.MaxSessions,
+		MaxSessionsPerPeer: cfg.MaxSessionsPerPeer,
 		Peers:              reachable{peers},
 	})
 	if err != nil {

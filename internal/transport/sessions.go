@@ -17,6 +17,7 @@ const maxSessionBody = 4 << 10
 const (
 	codeNotReachable   = "peer_not_reachable"
 	codeSessionsFull   = "too_many_sessions"
+	codePeerSessions   = "too_many_sessions_for_you"
 	codeBadTransition  = "not_a_valid_transition"
 	codeCannotCallSelf = "cannot_call_yourself"
 )
@@ -96,6 +97,11 @@ func OpenSession(store *session.Store) http.Handler {
 			return
 		case errors.Is(err, session.ErrFull):
 			writeError(w, http.StatusServiceUnavailable, codeSessionsFull)
+			return
+		case errors.Is(err, session.ErrTooManyForPeer):
+			// Distinct from the deployment being full: this caller is at its own
+			// limit and closing something of its own is what fixes it.
+			writeError(w, http.StatusTooManyRequests, codePeerSessions)
 			return
 		case err != nil:
 			writeError(w, http.StatusBadRequest, codeInvalidRequest)

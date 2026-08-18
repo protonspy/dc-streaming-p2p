@@ -269,6 +269,7 @@ func testRoutes(t *testing.T, cfg config.Config) *http.ServeMux {
 		NegotiationTimeout: cfg.NegotiationTimeout,
 		Retention:          cfg.SessionRetention,
 		MaxSessions:        cfg.MaxSessions,
+		MaxSessionsPerPeer: cfg.MaxSessionsPerPeer,
 		Peers:              reachable{peers},
 	})
 	if err != nil {
