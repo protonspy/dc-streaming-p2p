@@ -37,6 +37,7 @@ and when a relay killed mid-transmission is replaced without the sender stopping
 - `specs/registry-replication/` — reconciling peer records between anchors, and what wins when two disagree
 - `specs/control-plane-failover/` — a peer that loses its server: detection, the next candidate, and re-registration without dropping the call
 - `specs/relay-failover/` — replacing a relay mid-transmission, and choosing the least loaded peer server that can take it
+- `specs/session-migration/` — a server that dies mid-transmission: naming its successor, telling the clients that were on it, and continuing the stream on the new one
 - `specs/anchor-selection/` — probing the known anchors at once under a deadline and picking the one that answers fastest and carries least, which becomes that session's coordinator
 
 ## Out of scope
@@ -63,4 +64,5 @@ and when a relay killed mid-transmission is replaced without the sender stopping
 - Two anchors started independently converge on the same set of peers, and a peer removed on one disappears from the other
 - A relay stopped mid-transmission is replaced by another peer server without the sender restarting the call
 - A client given several anchors probes them at once, chooses one inside its deadline, and chooses a different one when the first is slow or loaded
+- A server carrying a transmission is stopped, another peer server is named in its place, and every client that was on the old one continues on the named successor
 - An anchor nobody authorized cannot enter the membership list of another
