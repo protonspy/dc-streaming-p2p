@@ -106,7 +106,7 @@ func (s *Server) Addr() string {
 func (s *Server) Run(ctx context.Context) error {
 	errs := make(chan error, 1)
 	go func() {
-		s.logger.Info("serving", slog.String("addr", s.Addr()))
+		s.logger.InfoContext(ctx, "serving", slog.String("addr", s.Addr()))
 		err := s.http.Serve(s.listener)
 		if errors.Is(err, http.ErrServerClosed) {
 			err = nil
@@ -120,7 +120,7 @@ func (s *Server) Run(ctx context.Context) error {
 	case <-ctx.Done():
 	}
 
-	s.logger.Info("draining", slog.Duration("timeout", s.shutdown))
+	s.logger.InfoContext(ctx, "draining", slog.Duration("timeout", s.shutdown))
 	drainCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.shutdown)
 	defer cancel()
 
@@ -128,7 +128,7 @@ func (s *Server) Run(ctx context.Context) error {
 	serveErr := <-errs
 
 	if errors.Is(shutdownErr, context.DeadlineExceeded) {
-		s.logger.Warn("drain timed out, closing what was left")
+		s.logger.WarnContext(drainCtx, "drain timed out, closing what was left")
 		shutdownErr = s.http.Close()
 	}
 	return errors.Join(serveErr, shutdownErr)

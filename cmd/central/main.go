@@ -61,7 +61,7 @@ func run(ctx context.Context, args []string, getenv config.Getenv, stdout, stder
 		return err
 	}
 
-	logger.Info("starting", slog.String("build", buildinfo.String()), slog.String("config", cfg.String()))
+	logger.InfoContext(ctx, "starting", slog.String("build", buildinfo.String()), slog.String("config", cfg.String()))
 
 	handler := transport.Chain(routes(cfg), transport.WithRequestID, transport.WithLogging(logger))
 	srv, err := transport.NewServer(ctx, handler, transport.Options{
