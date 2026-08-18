@@ -206,3 +206,15 @@ func TestRoutesAnswersNothingElseYet(t *testing.T) {
 		t.Errorf("GET /peers = %d, want %d until the specs land", rec.Code, http.StatusNotFound)
 	}
 }
+
+func TestRunHelpIsNotAFailure(t *testing.T) {
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+
+	if err := run(context.Background(), []string{"-help"}, testEnv(nil), &out, &errOut); err != nil {
+		t.Errorf("run(-help) error = %v, want nil — asking for the usage is not a failure", err)
+	}
+	if !strings.Contains(errOut.String(), "-version") {
+		t.Errorf("run(-help) wrote %q, want the usage", errOut.String())
+	}
+}

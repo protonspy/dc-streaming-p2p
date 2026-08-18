@@ -2,7 +2,7 @@
 autonomy: auto
 ci: wait
 status: approved
-checksum: 31d7b4f4786af003316d5f0484280cb17f62583872dd1621df357f05e32d5387
+checksum: 7dd1d765f4cc61b7b69aeec5a3fc156928b1c0f9931f4422cfbff9712fd3ad75
 ---
 
 # P2P streaming
@@ -61,7 +61,7 @@ survives a peer disappearing without a goodbye.
   _Depends 1.3_
 - [x] 2.2 (Unit) Add the CI workflow — build, test, vet, and lint on every push
   _Depends 1.1_
-- [ ] 2.3 (Unit) Add a development compose file running the server against a local coturn
+- [x] 2.3 (Unit) Add a development compose file running the server against a local coturn
   _Depends 1.2_
 - [x] 2.4 (Unit) Record the adopted technology in docs/stack.md and the canonical vocabulary in docs/glossary.md
   _Depends 1.1_

@@ -30,5 +30,9 @@ is not listed here is an open decision, never something adopted silently.
 - **gofmt and go vet** — the format and the correctness checks that ship with the
   toolchain, run locally before a task closes and again in CI.
 - **GitHub Actions** — CI on every push and pull request, in `.github/workflows/ci.yml`.
+- **Docker Compose** — brings the server up against a real coturn with no setup, in
+  `deploy/compose.yaml`. The relay path cannot be exercised without a relay.
+- **distroless base image** — the image that runs has no shell and no package
+  manager, so a bug in the server is not also a foothold.
 - **@protonspy/scc** — grades the specs, the plan, and this knowledge base; CI pins
   the version so a new release cannot turn a green branch red on its own.

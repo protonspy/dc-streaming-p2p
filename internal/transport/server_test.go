@@ -185,3 +185,84 @@ func TestServerAddrReportsTheBoundPort(t *testing.T) {
 		t.Errorf("Addr() = %q, want the resolved port rather than 0", srv.Addr())
 	}
 }
+
+func TestNewServerBoundsEveryPhaseOfARequest(t *testing.T) {
+	srv, err := NewServer(context.Background(), http.NewServeMux(), Options{
+		Addr:   "127.0.0.1:0",
+		Logger: quietLogger(),
+	})
+	if err != nil {
+		t.Fatalf("NewServer() error = %v, want nil", err)
+	}
+	t.Cleanup(func() { srv.http.Close() })
+
+	timeouts := map[string]time.Duration{
+		"ReadHeaderTimeout": srv.http.ReadHeaderTimeout,
+		"ReadTimeout":       srv.http.ReadTimeout,
+		"WriteTimeout":      srv.http.WriteTimeout,
+		"IdleTimeout":       srv.http.IdleTimeout,
+	}
+	for name, got := range timeouts {
+		if got <= 0 {
+			t.Errorf("%s = %s, want a bound — an unbounded phase is a connection a client can hold open forever", name, got)
+		}
+	}
+}
+
+func TestNewServerKeepsTheConfiguredTimeouts(t *testing.T) {
+	srv, err := NewServer(context.Background(), http.NewServeMux(), Options{
+		Addr:              "127.0.0.1:0",
+		Logger:            quietLogger(),
+		ReadHeaderTimeout: time.Second,
+		ReadTimeout:       2 * time.Second,
+		WriteTimeout:      3 * time.Second,
+		IdleTimeout:       4 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("NewServer() error = %v, want nil", err)
+	}
+	t.Cleanup(func() { srv.http.Close() })
+
+	if srv.http.ReadHeaderTimeout != time.Second || srv.http.ReadTimeout != 2*time.Second ||
+		srv.http.WriteTimeout != 3*time.Second || srv.http.IdleTimeout != 4*time.Second {
+		t.Errorf("timeouts = %s/%s/%s/%s, want 1s/2s/3s/4s",
+			srv.http.ReadHeaderTimeout, srv.http.ReadTimeout, srv.http.WriteTimeout, srv.http.IdleTimeout)
+	}
+}
+
+func TestServerCutsOffAClientThatStopsSendingItsBody(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /slow-body", func(w http.ResponseWriter, r *http.Request) {
+		io.Copy(io.Discard, r.Body)
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	srv, err := NewServer(context.Background(), mux, Options{
+		Addr:        "127.0.0.1:0",
+		ReadTimeout: 150 * time.Millisecond,
+		Logger:      quietLogger(),
+	})
+	if err != nil {
+		t.Fatalf("NewServer() error = %v, want nil", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go srv.Run(ctx)
+
+	conn, err := net.Dial("tcp", srv.Addr())
+	if err != nil {
+		t.Fatalf("net.Dial() error = %v, want nil", err)
+	}
+	defer conn.Close()
+
+	// Announce a body and never send it.
+	request := "POST /slow-body HTTP/1.1\r\nHost: x\r\nContent-Length: 100\r\n\r\n"
+	if _, err := conn.Write([]byte(request)); err != nil {
+		t.Fatalf("write error = %v, want nil", err)
+	}
+
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, err := io.ReadAll(conn); err != nil {
+		t.Fatalf("the connection was still open after the read timeout: %v", err)
+	}
+}

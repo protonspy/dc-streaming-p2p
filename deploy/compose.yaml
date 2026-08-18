@@ -1,0 +1,42 @@
+# Development only. It runs the central server against a coturn on the same
+# machine, which is enough to exercise the relay path locally — but a relay behind
+# a container network is not a relay behind a real NAT, so a call that works here
+# has not proven the fallback works in the field.
+name: dc-streaming-p2p
+
+services:
+  central:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      CENTRAL_LISTEN_ADDR: ":8080"
+      # Development values. Anything real comes from the deployment's own secret
+      # store: this file is committed and everything in it is public.
+      CENTRAL_TOKEN_SIGNING_KEY: development-signing-key-32-characters
+      CENTRAL_TOKEN_TTL: "1h"
+      CENTRAL_HEARTBEAT_INTERVAL: "15s"
+      CENTRAL_SUSPECT_AFTER: "30s"
+      CENTRAL_OFFLINE_AFTER: "60s"
+      CENTRAL_STUN_URLS: "stun:${TURN_HOST:-127.0.0.1}:3478"
+      CENTRAL_TURN_URLS: "turn:${TURN_HOST:-127.0.0.1}:3478"
+      # Matches static-auth-secret in coturn/turnserver.conf. The central server
+      # signs credentials with it; the relay verifies them with it; it never
+      # reaches a browser.
+      CENTRAL_TURN_SECRET: development-turn-secret
+      CENTRAL_TURN_CREDENTIAL_TTL: "10m"
+      CENTRAL_ALLOWED_ORIGINS: "http://localhost:8080"
+    depends_on:
+      - coturn
+
+  coturn:
+    image: coturn/coturn:4.6-alpine
+    # The relay allocates from a port range and needs the host's own addresses to
+    # advertise, which is what host networking gives it. On Docker Desktop this
+    # falls back to published ports; see coturn/turnserver.conf.
+    network_mode: host
+    volumes:
+      - ./coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
+    command: ["-c", "/etc/coturn/turnserver.conf"]

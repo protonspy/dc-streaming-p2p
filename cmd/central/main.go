@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -37,6 +38,11 @@ func run(ctx context.Context, args []string, getenv config.Getenv, stdout, stder
 	showVersion := flags.Bool("version", false, "print the build and exit")
 	logFormat := flags.String("log", "json", "log format: json or text")
 	if err := flags.Parse(args); err != nil {
+		// Asking for the usage is not a failure: the flag package has already
+		// printed it, and exiting non-zero for it breaks anything that shells out.
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
 		return err
 	}
 
