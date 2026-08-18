@@ -52,3 +52,4 @@ The peer identifier is the durable identity and the token is not; see
 - **R4.2** The authentication service shall hold each configured secret only as a hash, and shall compare a presented secret in a way that does not reveal, by how long it takes, how much of it was right.
 - **R4.3** If a configured client is missing a field, or its secret is shorter than the minimum this service accepts, then the server shall refuse to start and shall name the client it refused.
 - **R4.4** If no clients are configured, then the server shall refuse to start.
+- **R4.5** If a configured peer identifier is longer than the maximum, or carries a character that would not survive being signed into a token and joined into a relay credential, then the server shall refuse to start and shall name the client it refused.

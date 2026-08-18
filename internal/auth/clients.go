@@ -10,6 +10,28 @@ import (
 	"strings"
 )
 
+// peerIDAllowed is the character set a peer identifier may use. It is narrow
+// because the identifier is not only ours: it is signed into a token, joined into
+// a relay credential username, and logged by the relay. A colon in it would be
+// read by the relay as the separator before the expiry, so an identifier that
+// cannot be carried everywhere is refused where it is configured rather than
+// where it is used — a startup refusal instead of a per-request failure a peer
+// cannot act on.
+func peerIDAllowed(r rune) bool {
+	switch {
+	case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		return true
+	case r == '-', r == '_', r == '.':
+		return true
+	default:
+		return false
+	}
+}
+
+// MaxPeerIDLen bounds the identifier, which ends up in a map key, a token claim
+// and a relay username.
+const MaxPeerIDLen = 128
+
 // MinSecretLen is the shortest client secret this service accepts. Secrets are
 // held as a plain hash rather than a password hash, which is only defensible
 // because they are machine credentials this long — see the spec's design.
@@ -63,6 +85,15 @@ func NewClientStore(configs []ClientConfig) (*ClientStore, error) {
 		case peerID == "":
 			problems = append(problems, fmt.Errorf("client %q: no peer_id", id))
 			continue
+		case len(peerID) > MaxPeerIDLen:
+			problems = append(problems, fmt.Errorf("client %q: peer_id is %d characters, at most %d",
+				id, len(peerID), MaxPeerIDLen))
+			continue
+		case !validPeerID(peerID):
+			problems = append(problems, fmt.Errorf(
+				"client %q: peer_id %q has a character outside a-z A-Z 0-9 - _ . — it has to survive a token claim and a relay username",
+				id, peerID))
+			continue
 		case len(c.Secret) < MinSecretLen:
 			problems = append(problems, fmt.Errorf("client %q: secret is %d characters, needs at least %d",
 				id, len(c.Secret), MinSecretLen))
@@ -115,4 +146,15 @@ func (s *ClientStore) Authenticate(id, secret string) (string, error) {
 // configuration was read without saying what is in it.
 func (s *ClientStore) Len() int {
 	return len(s.clients)
+}
+
+// validPeerID reports whether every character of the identifier is one that
+// survives everywhere the identifier goes.
+func validPeerID(peerID string) bool {
+	for _, r := range peerID {
+		if !peerIDAllowed(r) {
+			return false
+		}
+	}
+	return peerID != ""
 }
