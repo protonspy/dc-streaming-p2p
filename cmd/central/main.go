@@ -14,12 +14,14 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/protonspy/dc-streaming-p2p/internal/auth"
 	"github.com/protonspy/dc-streaming-p2p/internal/buildinfo"
 	"github.com/protonspy/dc-streaming-p2p/internal/config"
 	"github.com/protonspy/dc-streaming-p2p/internal/ice"
 	"github.com/protonspy/dc-streaming-p2p/internal/registry"
+	"github.com/protonspy/dc-streaming-p2p/internal/session"
 	"github.com/protonspy/dc-streaming-p2p/internal/transport"
 )
 
@@ -94,11 +96,34 @@ func run(ctx context.Context, args []string, getenv config.Getenv, stdout, stder
 		return err
 	}
 
-	// Expiry runs for as long as the server does: a peer that stopped answering
-	// and that nothing asks about still has to leave the registry and the counts.
-	go peers.Sweep(ctx, cfg.ExpiryInterval, func(removed int) {
-		logger.InfoContext(ctx, "peers expired", slog.Int("removed", removed))
+	sessions, err := session.New(session.Options{
+		NegotiationTimeout: cfg.NegotiationTimeout,
+		Retention:          cfg.SessionRetention,
+		MaxSessions:        cfg.MaxSessions,
+		Peers:              reachable{peers},
 	})
+	if err != nil {
+		return err
+	}
+
+	// Expiry runs for as long as the server does: a peer that stopped answering
+	// and that nothing asks about still has to leave the registry and the counts —
+	// and every session it was in has to end, since the far side is waiting on a
+	// peer that is not there.
+	go peers.Sweep(ctx, cfg.ExpiryInterval, func(removed []string) {
+		var closed int
+		for _, peerID := range removed {
+			closed += sessions.ClosePeer(peerID)
+		}
+		logger.InfoContext(ctx, "peers expired",
+			slog.Int("peers", len(removed)),
+			slog.Int("sessions_closed", closed),
+		)
+	})
+
+	// Sessions settle on read, so this only bounds the memory: it fails what has
+	// been negotiating too long and forgets what is past its retention.
+	go sweepSessions(ctx, sessions, cfg.ExpiryInterval, logger)
 
 	iceProvider, err := ice.NewProvider(ice.Options{
 		STUNURLs:      cfg.STUNURLs,
@@ -110,7 +135,7 @@ func run(ctx context.Context, args []string, getenv config.Getenv, stdout, stder
 		return err
 	}
 
-	handler := transport.Chain(routes(cfg, clients, issuer, limiter, peers, iceProvider, logger),
+	handler := transport.Chain(routes(cfg, clients, issuer, limiter, peers, sessions, iceProvider, logger),
 		transport.WithRequestID, transport.WithLogging(logger))
 	srv, err := transport.NewServer(ctx, handler, transport.Options{
 		Addr:            cfg.ListenAddr,
@@ -135,6 +160,7 @@ func routes(
 	issuer *auth.TokenIssuer,
 	limiter *auth.AttemptLimiter,
 	peers *registry.Registry,
+	sessions *session.Store,
 	iceProvider *ice.Provider,
 	logger *slog.Logger,
 ) *http.ServeMux {
@@ -142,6 +168,7 @@ func routes(
 
 	mux.Handle("GET /healthz", transport.Health(transport.HealthDeps{
 		PeersOnline:     func() int { return peers.Count().Online },
+		SessionsLive:    sessions.Count,
 		RelayConfigured: cfg.RelayConfigured(),
 		Build:           buildinfo.String(),
 	}))
@@ -167,6 +194,11 @@ func routes(
 	mux.Handle("GET /peers/{id}", guard(transport.PeerLookup(peers)))
 	mux.Handle("GET /ice-config", guard(transport.ICEConfig(iceProvider)))
 
+	mux.Handle("POST /sessions", guard(transport.OpenSession(sessions)))
+	mux.Handle("GET /sessions/{id}", guard(transport.GetSession(sessions)))
+	mux.Handle("DELETE /sessions/{id}", guard(transport.GetSession(sessions)))
+	mux.Handle("POST /sessions/{id}/state", guard(transport.ReportSession(sessions)))
+
 	return mux
 }
 
@@ -181,5 +213,43 @@ func newLogger(w io.Writer, format string) (*slog.Logger, error) {
 		return slog.New(slog.NewTextHandler(w, opts)), nil
 	default:
 		return nil, fmt.Errorf("unknown log format %q, want json or text", format)
+	}
+}
+
+// reachable adapts the registry to what the session store asks of it: whether a
+// peer can be reached at all. The session store does not need the record, only the
+// answer, so this is the whole of the coupling between them.
+type reachable struct {
+	peers *registry.Registry
+}
+
+func (r reachable) Lookup(peerID string) bool {
+	_, held := r.peers.Lookup(peerID)
+	return held
+}
+
+// sweepSessions fails what has negotiated too long and forgets what is past its
+// retention, until ctx is cancelled.
+func sweepSessions(ctx context.Context, sessions *session.Store, every time.Duration, logger *slog.Logger) {
+	if every <= 0 {
+		every = time.Minute
+	}
+
+	ticker := time.NewTicker(every)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			failed, forgotten := sessions.Reap()
+			if failed > 0 || forgotten > 0 {
+				logger.InfoContext(ctx, "sessions swept",
+					slog.Int("failed", failed),
+					slog.Int("forgotten", forgotten),
+				)
+			}
+		}
 	}
 }

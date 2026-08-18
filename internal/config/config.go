@@ -60,6 +60,11 @@ type Config struct {
 
 	// MaxPeers is the ceiling on how many peers the registry holds at once.
 	MaxPeers int
+	// MaxSessions is the ceiling on how many sessions are live at once.
+	MaxSessions int
+	// SessionRetention is how long an ended session is readable before it is
+	// forgotten, so a peer that reconnects can still learn why its call ended.
+	SessionRetention time.Duration
 	// ExpiryInterval is how often expired peers are swept out, whether or not
 	// anything reads them.
 	ExpiryInterval time.Duration
@@ -144,6 +149,8 @@ func Load(getenv Getenv) (Config, error) {
 		OfflineAfter:       duration("OFFLINE_AFTER", "60s"),
 		NegotiationTimeout: duration("NEGOTIATION_TIMEOUT", "2m"),
 		MaxPeers:           whole("MAX_PEERS", "10000"),
+		MaxSessions:        whole("MAX_SESSIONS", "10000"),
+		SessionRetention:   duration("SESSION_RETENTION", "10m"),
 		ExpiryInterval:     duration("EXPIRY_INTERVAL", "15s"),
 		STUNURLs:           splitList(get("STUN_URLS", "stun:stun.l.google.com:19302")),
 		TURNURLs:           splitList(get("TURN_URLS", "")),

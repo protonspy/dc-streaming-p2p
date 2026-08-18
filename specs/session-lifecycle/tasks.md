@@ -7,26 +7,26 @@ ci: wait
 
 ## 1 · The store
 
-- [ ] 1.1 (Unit) Add the session store: open a session, read one, and hold at most the configured number — R1.1, R1.6, R4.1
-- [ ] 1.2 (TDD) Move a session between states, refusing a move it cannot make and leaving it as it was — R2.1, R2.2, R2.3, R2.4, R4.2
+- [x] 1.1 (Unit) Add the session store: open a session, read one, and hold at most the configured number — R1.1, R1.6, R4.1
+- [x] 1.2 (TDD) Move a session between states, refusing a move it cannot make and leaving it as it was — R2.1, R2.2, R2.3, R2.4, R4.2
   _Depends 1.1_
-- [ ] 1.3 (Unit) Answer an existing session for a pair that already has one, whichever of them asks — R1.7
+- [x] 1.3 (Unit) Answer an existing session for a pair that already has one, whichever of them asks — R1.7
   _Depends 1.1_
-- [ ] 1.4 (TDD) Fail a session still negotiating past the timeout, and forget an ended one past its retention — R2.5, R2.7
+- [x] 1.4 (TDD) Fail a session still negotiating past the timeout, and forget an ended one past its retention — R2.5, R2.7
   _Depends 1.2_
-- [ ] 1.5 (Unit) Close every session a peer was in when that peer leaves the registry — R2.6
+- [x] 1.5 (Unit) Close every session a peer was in when that peer leaves the registry — R2.6
   _Depends 1.2_
-- [ ] 1.6 (Unit) Decide whether a caller may reach a callee, behind one interface — R1.4
+- [x] 1.6 (Unit) Decide whether a caller may reach a callee, behind one interface — R1.4
   _Depends 1.1_
-- [ ] 1.7 (Unit) Count live sessions for the health endpoint — R3.3
+- [x] 1.7 (Unit) Count live sessions for the health endpoint — R3.3
 
 ## 2 · The HTTP surface
 
-- [ ] 2.1 (Unit) Open a session: the caller from the token, the callee from the request, refusing an unreachable peer, one it may not reach, and itself — R1.1, R1.2, R1.3, R1.5, R3.4
+- [x] 2.1 (Unit) Open a session: the caller from the token, the callee from the request, refusing an unreachable peer, one it may not reach, and itself — R1.1, R1.2, R1.3, R1.5, R3.4
   _Depends 1.1, 1.3, 1.6_
-- [ ] 2.2 (Unit) Report a session to a peer in it, and answer as though it did not exist to anyone else — R3.1, R3.2
+- [x] 2.2 (Unit) Report a session to a peer in it, and answer as though it did not exist to anyone else — R3.1, R3.2
   _Depends 1.1_
-- [ ] 2.3 (Unit) Take the report of what happened — connected with its path, failed, or closed — R2.2, R2.3, R2.4
+- [x] 2.3 (Unit) Take the report of what happened — connected with its path, failed, or closed — R2.2, R2.3, R2.4
   _Depends 1.2_
-- [ ] 2.4 (Unit) Wire the counts into health, the timeout sweep into the server's lifetime, and the registry's expiry into closing sessions — R2.5, R2.6, R3.3
+- [x] 2.4 (Unit) Wire the counts into health, the timeout sweep into the server's lifetime, and the registry's expiry into closing sessions — R2.5, R2.6, R3.3
   _Depends 1.4, 1.5, 1.7_
