@@ -1,0 +1,43 @@
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    # Unchecked errors are the defect class tests do not find, which is the whole
+    # reason the lint runs beside them.
+    - errcheck
+    - bodyclose
+    - noctx
+    - errorlint
+    - contextcheck
+    - copyloopvar
+    - misspell
+    - revive
+    - unconvert
+    - wastedassign
+
+  settings:
+    errcheck:
+      # Writing to standard output or to a response that is already committed has
+      # no recovery; the request log is where that failure shows up.
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - (net/http.ResponseWriter).Write
+
+  exclusions:
+    rules:
+      # A test asserts on what a call returned; the ones it deliberately ignores
+      # are noise here rather than defects.
+      - path: _test\.go
+        linters: [errcheck, bodyclose, noctx]
+      # A test handler keeps the standard signature; naming half of it _ to satisfy
+      # the linter makes the test read less like the code it stands in for.
+      - path: _test\.go
+        linters: [revive]
+        text: unused-parameter
+
+formatters:
+  enable:
+    - gofmt
