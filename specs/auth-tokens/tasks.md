@@ -30,5 +30,5 @@ ci: wait
 
 ## 3 · The client side
 
-- [ ] 3.1 (Unit) Pin the expected public key in the client: fetch the key set and refuse a server presenting any other key before sending a credential — R3.3
+- [x] 3.1 (Unit) Pin the expected public key in the client: fetch the key set and refuse a server presenting any other key before sending a credential — R3.3
   _Depends 2.2_
