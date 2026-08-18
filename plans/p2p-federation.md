@@ -27,6 +27,7 @@ and when a relay killed mid-transmission is replaced without the sender stopping
 - `cmd/anchor/` — the anchor binary
 - `internal/federation/` — the membership list, the gossip protocol, reconciliation
 - `internal/relaypool/` — relay candidates, their load, and the choice between them
+- `web/sdk/` — the parallel probe and the choice a client makes from its results
 - `internal/registry/` — grows a remote half beside the local one
 
 ## References
@@ -36,6 +37,7 @@ and when a relay killed mid-transmission is replaced without the sender stopping
 - `specs/registry-replication/` — reconciling peer records between anchors, and what wins when two disagree
 - `specs/control-plane-failover/` — a peer that loses its server: detection, the next candidate, and re-registration without dropping the call
 - `specs/relay-failover/` — replacing a relay mid-transmission, and choosing the least loaded peer server that can take it
+- `specs/anchor-selection/` — probing the known anchors at once under a deadline and picking the one that answers fastest and carries least, which becomes that session's coordinator
 
 ## Out of scope
 
@@ -52,10 +54,13 @@ and when a relay killed mid-transmission is replaced without the sender stopping
   _Depends 1.1_
 - [ ] 1.3 (Unit) Record the wire protocol between anchors in the wiki, before either side is written
   _Depends 1.1_
+- [ ] 1.4 (Unit) Record what an anchor reports as its load, and why a client can believe a number the anchor itself chose
+  _Depends 1.1_
 
 ## Done when
 
 - A peer whose anchor is stopped re-registers with the next anchor on its list, and a call in progress survives it
 - Two anchors started independently converge on the same set of peers, and a peer removed on one disappears from the other
 - A relay stopped mid-transmission is replaced by another peer server without the sender restarting the call
+- A client given several anchors probes them at once, chooses one inside its deadline, and chooses a different one when the first is slow or loaded
 - An anchor nobody authorized cannot enter the membership list of another
