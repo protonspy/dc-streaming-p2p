@@ -1,40 +1,57 @@
-# Ice config — design
+---
+autonomy: auto
+ci: wait
+---
 
-<!-- The design must fit the decision being made. Every heading below except
-     "What changes" is OPTIONAL: delete the ones this change does not decide.
-
-     A heading filled with "N/A", or with prose written to satisfy the heading, is
-     worse than an absent heading — the next session reads invented architecture as
-     a decision somebody made, and honors it. Filler becomes binding.
-
-     Delete this comment too. -->
+# ICE configuration — design
 
 ## What changes
 
-Serves R1.1.
+Serves R1.1 through R2.2.
 
-<!-- Required. What changes, where, and why. For a change that decides nothing
-     structural, this section is the whole design and that is the correct outcome.
+A new package `internal/ice` that turns the configured STUN and TURN URLs, plus the
+shared secret, into the list a browser can use — and nothing else. `internal/transport`
+gains `GET /ice-config` behind `RequireToken`.
 
-     Keep the "Serves" line above and make it real: the design has to name the
-     requirements it answers, or the trace from what to how is unreadable — and
-     `scc spec validate` says so. -->
+## Boundaries and contracts
 
-## Boundaries and contracts <!-- optional -->
+```json
+{
+  "ice_servers": [
+    { "urls": ["stun:stun.example:3478"] },
+    { "urls": ["turn:relay.example:3478"], "username": "1755561600:peer-001", "credential": "…" }
+  ],
+  "expires_at": "2026-08-19T00:00:00Z",
+  "relay_available": true
+}
+```
 
-<!-- Only if this change moves a boundary or an external contract, and only for the
-     parts that actually move. -->
+`ice_servers` is exactly what `RTCPeerConnection` takes, so the SDK passes it through
+without knowing what a relay is. `relay_available` is reported rather than inferred
+from an empty list: a peer that cannot find a direct path and has no relay should say
+so, not fail as though the network were at fault.
 
-## Data <!-- optional -->
+## Data
 
-<!-- Only if a data shape changes. -->
+The credential is the mechanism coturn and every managed provider implement:
 
-## Alternatives considered <!-- optional -->
+```
+username   = <unix expiry>:<peer identifier>
+credential = base64( HMAC-SHA1( shared secret, username ) )
+```
 
-<!-- Only where there were real alternatives with trade-offs. Say which won and why.
-     If the decision is hard to reverse, write an ADR under docs/adr/ and cite it
-     here instead of arguing it twice. -->
+HMAC-SHA1 is not a choice this project gets to make — the relay verifies exactly
+this construction, and the security of the scheme rests on the secret and the short
+lifetime rather than on the hash. The secret never leaves the server; what a browser
+receives is one signature, valid for minutes.
 
-## Risks <!-- optional -->
+The peer identifier goes in the username because that is what makes a relayed
+allocation attributable: the relay logs it, so an allocation can be traced to a peer
+without the relay knowing anything else about it.
 
-<!-- What could go wrong that the task list does not already cover. -->
+## Risks
+
+The credential outlives the answer that carried it, by exactly the configured
+lifetime. A call that starts near the end of that window can outlast its own
+credential, which is why `expires_at` is answered — the SDK is expected to ask for
+another rather than discover the relay refusing mid-call.

@@ -16,6 +16,7 @@ import (
 
 	"github.com/protonspy/dc-streaming-p2p/internal/auth"
 	"github.com/protonspy/dc-streaming-p2p/internal/config"
+	"github.com/protonspy/dc-streaming-p2p/internal/ice"
 	"github.com/protonspy/dc-streaming-p2p/internal/registry"
 )
 
@@ -253,7 +254,17 @@ func testRoutes(t *testing.T, cfg config.Config) *http.ServeMux {
 		t.Fatalf("registry.New() error = %v, want nil", err)
 	}
 
-	return routes(cfg, clients, issuer, limiter, peers, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	iceProvider, err := ice.NewProvider(ice.Options{
+		STUNURLs:      cfg.STUNURLs,
+		TURNURLs:      cfg.TURNURLs,
+		Secret:        cfg.TURNSecret,
+		CredentialTTL: cfg.TURNCredentialTTL,
+	})
+	if err != nil {
+		t.Fatalf("ice.NewProvider() error = %v, want nil", err)
+	}
+
+	return routes(cfg, clients, issuer, limiter, peers, iceProvider, slog.New(slog.NewTextHandler(io.Discard, nil)))
 }
 
 func TestRoutesServesTheKeySetAndTheAuthEndpoint(t *testing.T) {
@@ -295,6 +306,7 @@ func TestRoutesGuardTheRegistry(t *testing.T) {
 		{method: http.MethodDelete, path: "/peers"},
 		{method: http.MethodPost, path: "/peers/heartbeat"},
 		{method: http.MethodGet, path: "/peers/peer-001"},
+		{method: http.MethodGet, path: "/ice-config"},
 	} {
 		t.Run(route.method+" "+route.path, func(t *testing.T) {
 			rec := httptest.NewRecorder()
