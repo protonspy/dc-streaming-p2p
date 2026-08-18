@@ -1,0 +1,3 @@
+# Go, YAML, Markdown and the shell scripts in CI are all read by tools that want
+# LF, and gofmt reports a CRLF file as unformatted. Normalize everything.
+* text=auto eol=lf
