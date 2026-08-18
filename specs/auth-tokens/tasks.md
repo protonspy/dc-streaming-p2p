@@ -19,13 +19,13 @@ ci: wait
 
 ## 2 · The HTTP surface
 
-- [ ] 2.1 (Unit) Serve POST /auth: one rejection shape for every credential failure, and the same observable cost for an unknown client as for a wrong secret — R1.1, R1.4, R1.5, R1.7
+- [x] 2.1 (Unit) Serve POST /auth: one rejection shape for every credential failure, and the same observable cost for an unknown client as for a wrong secret — R1.1, R1.4, R1.5, R1.7
   _Depends 1.2, 1.3, 1.5_
-- [ ] 2.2 (Unit) Publish the public key as a JWK set, unauthenticated, with the signing key held back — R3.1, R3.2
+- [x] 2.2 (Unit) Publish the public key as a JWK set, unauthenticated, with the signing key held back — R3.1, R3.2
   _Depends 1.3_
-- [ ] 2.3 (Unit) Authenticate a request from its token and carry the peer identifier in its context, taking it from nowhere else — R2.4
+- [x] 2.3 (Unit) Authenticate a request from its token and carry the peer identifier in its context, taking it from nowhere else — R2.4
   _Depends 1.4_
-- [ ] 2.4 (Unit) Keep tokens and secrets out of logs, error bodies, and the health endpoint — R2.6
+- [x] 2.4 (Unit) Keep tokens and secrets out of logs, error bodies, and the health endpoint — R2.6
   _Depends 2.1, 2.3_
 
 ## 3 · The client side
