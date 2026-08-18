@@ -33,7 +33,7 @@ and when a relay killed mid-transmission is replaced without the sender stopping
 
 ## References
 
-- `specs/anchor-node/` — the anchor: what it registers, what it holds, and how a peer server inside a network reaches it
+- `specs/anchor-node/` — the anchor: what it registers, what it holds, and how a peer server starting inside a network reaches it, carrying the central server's URL and its public key and talking to it over a channel that is encrypted and whose far end is pinned to that key
 - `specs/anchor-membership/` — the list of known anchors, how a new one joins from it, and how a dead one leaves it
 - `specs/registry-forwarding/` — an anchor asked for a peer it does not hold: who it asks, how far a question travels, and what it caches
 - `specs/control-plane-failover/` — a peer that loses its server: detection, the next candidate, and re-registration without dropping the call
@@ -68,3 +68,4 @@ and when a relay killed mid-transmission is replaced without the sender stopping
 - A client given several anchors probes them at once, chooses one inside its deadline, and chooses a different one when the first is slow or loaded
 - A server carrying a transmission is stopped, another peer server is named in its place, and every client that was on the old one continues on the named successor
 - An anchor nobody authorized cannot enter the membership list of another
+- A peer server started with the central server's URL and public key refuses a far end that presents any other key, and carries nothing in the clear
