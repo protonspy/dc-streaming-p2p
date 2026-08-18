@@ -21,11 +21,11 @@ ci: wait
 
 ## 2 · The HTTP surface
 
-- [ ] 2.1 (Unit) Serve register and deregister behind the token, taking the peer identifier from it and never from the body — R1.1, R1.2, R1.4, R1.5, R3.4
+- [x] 2.1 (Unit) Serve register and deregister behind the token, taking the peer identifier from it and never from the body — R1.1, R1.2, R1.4, R1.5, R3.4
   _Depends 1.1, 1.3_
-- [ ] 2.2 (Unit) Serve the heartbeat, answering a removed peer distinctly enough that it knows to register again — R2.1, R2.5
+- [x] 2.2 (Unit) Serve the heartbeat, answering a removed peer distinctly enough that it knows to register again — R2.1, R2.5
   _Depends 1.3_
-- [ ] 2.3 (Unit) Serve the lookup, answering the same shape for a peer that never existed and one that has gone — R3.1, R3.2
+- [x] 2.3 (Unit) Serve the lookup, answering the same shape for a peer that never existed and one that has gone — R3.1, R3.2
   _Depends 1.1_
-- [ ] 2.4 (Unit) Wire the registry's counts into the health endpoint and its ticker into the server's lifetime — R3.3, R4.2
+- [x] 2.4 (Unit) Wire the registry's counts into the health endpoint and its ticker into the server's lifetime — R3.3, R4.2
   _Depends 1.5, 1.6_

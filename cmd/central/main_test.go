@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/protonspy/dc-streaming-p2p/internal/auth"
 	"github.com/protonspy/dc-streaming-p2p/internal/config"
+	"github.com/protonspy/dc-streaming-p2p/internal/registry"
 )
 
 // testEnv is the smallest environment that starts the server, bound to a port the
@@ -203,11 +205,12 @@ func TestRoutesAnswersNothingElseYet(t *testing.T) {
 		t.Fatalf("config.Load() error = %v, want nil", err)
 	}
 
+	// Sessions and signaling are later specs; nothing answers for them yet.
 	rec := httptest.NewRecorder()
-	testRoutes(t, cfg).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/peers", nil))
+	testRoutes(t, cfg).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/sessions", nil))
 
 	if rec.Code != http.StatusNotFound {
-		t.Errorf("GET /peers = %d, want %d until the specs land", rec.Code, http.StatusNotFound)
+		t.Errorf("GET /sessions = %d, want %d until that spec lands", rec.Code, http.StatusNotFound)
 	}
 }
 
@@ -240,7 +243,17 @@ func testRoutes(t *testing.T, cfg config.Config) *http.ServeMux {
 		t.Fatalf("NewAttemptLimiter() error = %v, want nil", err)
 	}
 
-	return routes(cfg, clients, issuer, limiter, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	peers, err := registry.New(registry.Options{
+		HeartbeatInterval: cfg.HeartbeatInterval,
+		SuspectAfter:      cfg.SuspectAfter,
+		OfflineAfter:      cfg.OfflineAfter,
+		MaxPeers:          cfg.MaxPeers,
+	})
+	if err != nil {
+		t.Fatalf("registry.New() error = %v, want nil", err)
+	}
+
+	return routes(cfg, clients, issuer, limiter, peers, slog.New(slog.NewTextHandler(io.Discard, nil)))
 }
 
 func TestRoutesServesTheKeySetAndTheAuthEndpoint(t *testing.T) {
@@ -264,5 +277,69 @@ func TestRoutesServesTheKeySetAndTheAuthEndpoint(t *testing.T) {
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/auth", strings.NewReader(body)))
 	if rec.Code != http.StatusOK {
 		t.Errorf("POST /auth = %d, want %d — body %s", rec.Code, http.StatusOK, rec.Body)
+	}
+}
+
+func TestRoutesGuardTheRegistry(t *testing.T) {
+	cfg, err := config.Load(testEnv(nil))
+	if err != nil {
+		t.Fatalf("config.Load() error = %v, want nil", err)
+	}
+	mux := testRoutes(t, cfg)
+
+	for _, route := range []struct {
+		method string
+		path   string
+	}{
+		{method: http.MethodPost, path: "/peers"},
+		{method: http.MethodDelete, path: "/peers"},
+		{method: http.MethodPost, path: "/peers/heartbeat"},
+		{method: http.MethodGet, path: "/peers/peer-001"},
+	} {
+		t.Run(route.method+" "+route.path, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, httptest.NewRequest(route.method, route.path, nil))
+
+			if rec.Code != http.StatusUnauthorized {
+				t.Errorf("status = %d, want %d without a token", rec.Code, http.StatusUnauthorized)
+			}
+		})
+	}
+}
+
+func TestHealthCountsRegisteredPeers(t *testing.T) {
+	cfg, err := config.Load(testEnv(nil))
+	if err != nil {
+		t.Fatalf("config.Load() error = %v, want nil", err)
+	}
+	mux := testRoutes(t, cfg)
+
+	// Authenticate as the configured client, then register with the token it gave.
+	rec := httptest.NewRecorder()
+	body := `{"client_id":"sdk-web","client_secret":"` + strings.Repeat("s", 32) + `"}`
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/auth", strings.NewReader(body)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /auth = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var issued struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &issued); err != nil {
+		t.Fatalf("token body %q is not JSON: %v", rec.Body.String(), err)
+	}
+
+	register := httptest.NewRequest(http.MethodPost, "/peers", nil)
+	register.Header.Set("Authorization", "Bearer "+issued.Token)
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, register)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /peers = %d, want %d — body %s", rec.Code, http.StatusOK, rec.Body)
+	}
+
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	if !strings.Contains(rec.Body.String(), `"peers_online":1`) {
+		t.Errorf("health = %s, want one peer online", rec.Body.String())
 	}
 }

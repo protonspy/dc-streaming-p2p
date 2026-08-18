@@ -18,6 +18,7 @@ import (
 	"github.com/protonspy/dc-streaming-p2p/internal/auth"
 	"github.com/protonspy/dc-streaming-p2p/internal/buildinfo"
 	"github.com/protonspy/dc-streaming-p2p/internal/config"
+	"github.com/protonspy/dc-streaming-p2p/internal/registry"
 	"github.com/protonspy/dc-streaming-p2p/internal/transport"
 )
 
@@ -82,7 +83,23 @@ func run(ctx context.Context, args []string, getenv config.Getenv, stdout, stder
 		slog.String("key_id", transport.KeyID(issuer.PublicKey())),
 	)
 
-	handler := transport.Chain(routes(cfg, clients, issuer, limiter, logger),
+	peers, err := registry.New(registry.Options{
+		HeartbeatInterval: cfg.HeartbeatInterval,
+		SuspectAfter:      cfg.SuspectAfter,
+		OfflineAfter:      cfg.OfflineAfter,
+		MaxPeers:          cfg.MaxPeers,
+	})
+	if err != nil {
+		return err
+	}
+
+	// Expiry runs for as long as the server does: a peer that stopped answering
+	// and that nothing asks about still has to leave the registry and the counts.
+	go peers.Sweep(ctx, cfg.ExpiryInterval, func(removed int) {
+		logger.InfoContext(ctx, "peers expired", slog.Int("removed", removed))
+	})
+
+	handler := transport.Chain(routes(cfg, clients, issuer, limiter, peers, logger),
 		transport.WithRequestID, transport.WithLogging(logger))
 	srv, err := transport.NewServer(ctx, handler, transport.Options{
 		Addr:            cfg.ListenAddr,
@@ -106,11 +123,13 @@ func routes(
 	clients *auth.ClientStore,
 	issuer *auth.TokenIssuer,
 	limiter *auth.AttemptLimiter,
+	peers *registry.Registry,
 	logger *slog.Logger,
 ) *http.ServeMux {
 	mux := http.NewServeMux()
 
 	mux.Handle("GET /healthz", transport.Health(transport.HealthDeps{
+		PeersOnline:     func() int { return peers.Count().Online },
 		RelayConfigured: cfg.RelayConfigured(),
 		Build:           buildinfo.String(),
 	}))
@@ -124,6 +143,16 @@ func routes(
 		Logger:  logger,
 	}))
 	mux.Handle("GET /.well-known/jwks.json", transport.JWKS(issuer.PublicKey()))
+
+	// Everything below here is a peer acting as itself, so the token is the
+	// identity and the middleware is what supplies it.
+	verifier := auth.NewTokenVerifier(issuer.PublicKey(), cfg.Issuer)
+	guard := transport.RequireToken(verifier)
+
+	mux.Handle("POST /peers", guard(transport.Peers(peers)))
+	mux.Handle("DELETE /peers", guard(transport.Peers(peers)))
+	mux.Handle("POST /peers/heartbeat", guard(transport.Heartbeat(peers)))
+	mux.Handle("GET /peers/{id}", guard(transport.PeerLookup(peers)))
 
 	return mux
 }

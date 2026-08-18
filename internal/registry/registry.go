@@ -79,7 +79,7 @@ type Registry struct {
 	heartbeat time.Duration
 	suspect   time.Duration
 	offline   time.Duration
-	max       int
+	ceiling   int
 	now       func() time.Time
 }
 
@@ -110,9 +110,9 @@ func New(opts Options) (*Registry, error) {
 		return nil, errors.Join(problems...)
 	}
 
-	max := opts.MaxPeers
-	if max <= 0 {
-		max = DefaultMaxPeers
+	ceiling := opts.MaxPeers
+	if ceiling <= 0 {
+		ceiling = DefaultMaxPeers
 	}
 	now := opts.Now
 	if now == nil {
@@ -124,7 +124,7 @@ func New(opts Options) (*Registry, error) {
 		heartbeat: opts.HeartbeatInterval,
 		suspect:   opts.SuspectAfter,
 		offline:   opts.OfflineAfter,
-		max:       max,
+		ceiling:   ceiling,
 		now:       now,
 	}, nil
 }
@@ -149,11 +149,11 @@ func (r *Registry) Register(id string) (Peer, error) {
 	now := r.now()
 	existing, held := r.peers[id]
 
-	if !held && len(r.peers) >= r.max {
+	if !held && len(r.peers) >= r.ceiling {
 		// Expiring first is what keeps a full registry from refusing a peer while
 		// holding records nobody will ever hear from again.
 		r.expireLocked(now)
-		if len(r.peers) >= r.max {
+		if len(r.peers) >= r.ceiling {
 			return Peer{}, ErrFull
 		}
 	}

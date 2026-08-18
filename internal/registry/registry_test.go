@@ -11,7 +11,7 @@ import (
 
 // testRegistry builds a registry with a clock the test moves by hand: peers report
 // in at 10s, are suspect past 30s of silence, and gone past 60s.
-func testRegistry(t *testing.T, max int) (*Registry, *time.Time) {
+func testRegistry(t *testing.T, ceiling int) (*Registry, *time.Time) {
 	t.Helper()
 
 	clock := time.Date(2026, 8, 18, 12, 0, 0, 0, time.UTC)
@@ -19,7 +19,7 @@ func testRegistry(t *testing.T, max int) (*Registry, *time.Time) {
 		HeartbeatInterval: 10 * time.Second,
 		SuspectAfter:      30 * time.Second,
 		OfflineAfter:      60 * time.Second,
-		MaxPeers:          max,
+		MaxPeers:          ceiling,
 		Now:               func() time.Time { return clock },
 	})
 	if err != nil {
@@ -350,8 +350,8 @@ func TestDefaultCeilingApplies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New() error = %v, want nil", err)
 	}
-	if reg.max != DefaultMaxPeers {
-		t.Errorf("max = %d, want %d", reg.max, DefaultMaxPeers)
+	if reg.ceiling != DefaultMaxPeers {
+		t.Errorf("ceiling = %d, want %d", reg.ceiling, DefaultMaxPeers)
 	}
 	if reg.HeartbeatInterval() != 10*time.Second {
 		t.Errorf("HeartbeatInterval() = %s, want 10s", reg.HeartbeatInterval())
