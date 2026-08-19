@@ -38,4 +38,4 @@ application is told which happened, and does nothing differently either way.
 
 - **R3.1** The SDK shall report the state of a call as it changes, in terms the application can act on.
 - **R3.2** The SDK shall carry no session description or candidate into what the application sees.
-- **R3.3** If the SDK receives a message for a session it does not have, then it shall discard it rather than fail.
+- **R3.3** If a message arrives for a session the SDK does not have, then the SDK shall discard it rather than fail.
