@@ -19,6 +19,9 @@ is not listed here is an open decision, never something adopted silently.
   `adr:0006-sign-tokens-with-ed25519-and-publish-the-public-key`.
 - **crypto/ed25519, from the standard library** — the signature itself; the library
   above only frames it.
+- **coder/websocket** — the signaling channel. Context-aware reads and writes, no
+  dependencies of its own, and an origin check and subprotocol negotiation built in,
+  which is what the token in the subprotocol needs.
 - **WebRTC, in the browser** — the media path is the browser's own implementation;
   the server holds no track and no peer connection. See
   `adr:0001-split-control-plane-from-data-plane`.

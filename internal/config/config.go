@@ -72,6 +72,13 @@ type Config struct {
 	// anything reads them.
 	ExpiryInterval time.Duration
 
+	// MaxSignalMessageBytes bounds one signaling message.
+	MaxSignalMessageBytes int64
+	// SignalMessagesPerWindow and SignalWindow are how many messages one channel
+	// may send before the excess is refused.
+	SignalMessagesPerWindow int
+	SignalWindow            time.Duration
+
 	// STUNURLs are handed to peers as-is.
 	STUNURLs []string
 	// TURNURLs are the relay endpoints offered to peers. Empty disables the relay.
@@ -156,10 +163,14 @@ func Load(getenv Getenv) (Config, error) {
 		MaxSessionsPerPeer: whole("MAX_SESSIONS_PER_PEER", "64"),
 		SessionRetention:   duration("SESSION_RETENTION", "10m"),
 		ExpiryInterval:     duration("EXPIRY_INTERVAL", "15s"),
-		STUNURLs:           splitList(get("STUN_URLS", "stun:stun.l.google.com:19302")),
-		TURNURLs:           splitList(get("TURN_URLS", "")),
-		TURNSecret:         get("TURN_SECRET", ""),
-		TURNCredentialTTL:  duration("TURN_CREDENTIAL_TTL", "10m"),
+
+		MaxSignalMessageBytes:   int64(whole("MAX_SIGNAL_MESSAGE_BYTES", "131072")),
+		SignalMessagesPerWindow: whole("SIGNAL_MESSAGES_PER_WINDOW", "120"),
+		SignalWindow:            duration("SIGNAL_WINDOW", "1m"),
+		STUNURLs:                splitList(get("STUN_URLS", "stun:stun.l.google.com:19302")),
+		TURNURLs:                splitList(get("TURN_URLS", "")),
+		TURNSecret:              get("TURN_SECRET", ""),
+		TURNCredentialTTL:       duration("TURN_CREDENTIAL_TTL", "10m"),
 	}
 
 	problems = append(problems, cfg.validate()...)

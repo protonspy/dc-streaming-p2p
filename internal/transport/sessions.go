@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -55,6 +56,21 @@ func asResponse(s session.Session) sessionResponse {
 		OpenedAt:  s.OpenedAt,
 		ChangedAt: s.ChangedAt,
 	}
+}
+
+// Ended is told when a session stops being live, so the peer on the other side
+// learns about it on its signaling channel rather than by waiting. Nil is
+// allowed: the routes work without a channel to tell anybody on.
+type Ended interface {
+	SessionEnded(ctx context.Context, sessionID, state string, peers ...string)
+}
+
+// notifyEnded tells both peers, if there is anything to tell them on.
+func notifyEnded(ctx context.Context, ended Ended, s session.Session) {
+	if ended == nil || s.Live() {
+		return
+	}
+	ended.SessionEnded(ctx, s.ID, string(s.State), s.Caller, s.Callee)
 }
 
 // OpenSession serves POST /sessions.
@@ -113,7 +129,7 @@ func OpenSession(store *session.Store) http.Handler {
 }
 
 // GetSession serves GET /sessions/{id} and DELETE /sessions/{id}.
-func GetSession(store *session.Store) http.Handler {
+func GetSession(store *session.Store, ended Ended) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		peerID := PeerIDFrom(r.Context())
 		if peerID == "" {
@@ -143,6 +159,7 @@ func GetSession(store *session.Store) http.Handler {
 			case err != nil:
 				writeError(w, http.StatusBadRequest, codeInvalidRequest)
 			default:
+				notifyEnded(r.Context(), ended, closed)
 				writeJSONStatus(w, http.StatusOK, asResponse(closed))
 			}
 
@@ -154,7 +171,7 @@ func GetSession(store *session.Store) http.Handler {
 }
 
 // ReportSession serves POST /sessions/{id}/state.
-func ReportSession(store *session.Store) http.Handler {
+func ReportSession(store *session.Store, ended Ended) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		peerID := PeerIDFrom(r.Context())
 		if peerID == "" {
@@ -190,6 +207,7 @@ func ReportSession(store *session.Store) http.Handler {
 		case err != nil:
 			writeError(w, http.StatusBadRequest, codeInvalidRequest)
 		default:
+			notifyEnded(r.Context(), ended, moved)
 			writeJSONStatus(w, http.StatusOK, asResponse(moved))
 		}
 	})

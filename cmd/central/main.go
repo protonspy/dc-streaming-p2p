@@ -22,6 +22,7 @@ import (
 	"github.com/protonspy/dc-streaming-p2p/internal/ice"
 	"github.com/protonspy/dc-streaming-p2p/internal/registry"
 	"github.com/protonspy/dc-streaming-p2p/internal/session"
+	"github.com/protonspy/dc-streaming-p2p/internal/signaling"
 	"github.com/protonspy/dc-streaming-p2p/internal/transport"
 )
 
@@ -107,6 +108,20 @@ func run(ctx context.Context, args []string, getenv config.Getenv, stdout, stder
 		return err
 	}
 
+	hub, err := signaling.New(signaling.Options{
+		Sessions:          sessionsAsPairs{sessions},
+		Presence:          presence{peers},
+		MessagesPerWindow: cfg.SignalMessagesPerWindow,
+		Window:            cfg.SignalWindow,
+	})
+	if err != nil {
+		return err
+	}
+
+	// A peer holding a channel is a peer that is there, so the registry is told
+	// so on its own interval rather than making the peer report in twice.
+	go refreshPresence(ctx, hub, peers, cfg.HeartbeatInterval)
+
 	// Expiry runs for as long as the server does: a peer that stopped answering
 	// and that nothing asks about still has to leave the registry and the counts —
 	// and every session it was in has to end, since the far side is waiting on a
@@ -114,7 +129,12 @@ func run(ctx context.Context, args []string, getenv config.Getenv, stdout, stder
 	go peers.Sweep(ctx, cfg.ExpiryInterval, func(removed []string) {
 		var closed int
 		for _, peerID := range removed {
-			closed += sessions.ClosePeer(peerID)
+			for _, ended := range sessions.ClosePeer(peerID) {
+				closed++
+				// The peer still holding a channel is told, rather than left
+				// waiting on somebody who is gone.
+				hub.SessionEnded(ctx, ended.ID, string(ended.State), ended.Caller, ended.Callee)
+			}
 		}
 		logger.InfoContext(ctx, "peers expired",
 			slog.Int("peers", len(removed)),
@@ -136,7 +156,7 @@ func run(ctx context.Context, args []string, getenv config.Getenv, stdout, stder
 		return err
 	}
 
-	handler := transport.Chain(routes(cfg, clients, issuer, limiter, peers, sessions, iceProvider, logger),
+	handler := transport.Chain(routes(cfg, clients, issuer, limiter, peers, sessions, hub, iceProvider, logger),
 		transport.WithRequestID, transport.WithLogging(logger))
 	srv, err := transport.NewServer(ctx, handler, transport.Options{
 		Addr:            cfg.ListenAddr,
@@ -162,6 +182,7 @@ func routes(
 	limiter *auth.AttemptLimiter,
 	peers *registry.Registry,
 	sessions *session.Store,
+	hub *signaling.Hub,
 	iceProvider *ice.Provider,
 	logger *slog.Logger,
 ) *http.ServeMux {
@@ -170,6 +191,7 @@ func routes(
 	mux.Handle("GET /healthz", transport.Health(transport.HealthDeps{
 		PeersOnline:     func() int { return peers.Count().Online },
 		SessionsLive:    sessions.Count,
+		ChannelsOpen:    hub.Count,
 		RelayConfigured: cfg.RelayConfigured(),
 		Build:           buildinfo.String(),
 	}))
@@ -196,9 +218,20 @@ func routes(
 	mux.Handle("GET /ice-config", guard(transport.ICEConfig(iceProvider)))
 
 	mux.Handle("POST /sessions", guard(transport.OpenSession(sessions)))
-	mux.Handle("GET /sessions/{id}", guard(transport.GetSession(sessions)))
-	mux.Handle("DELETE /sessions/{id}", guard(transport.GetSession(sessions)))
-	mux.Handle("POST /sessions/{id}/state", guard(transport.ReportSession(sessions)))
+	mux.Handle("GET /sessions/{id}", guard(transport.GetSession(sessions, hub)))
+	mux.Handle("DELETE /sessions/{id}", guard(transport.GetSession(sessions, hub)))
+	mux.Handle("POST /sessions/{id}/state", guard(transport.ReportSession(sessions, hub)))
+
+	// The signaling channel authenticates itself: a browser cannot set headers on
+	// a WebSocket, so the token rides in the subprotocol and is verified before
+	// the upgrade.
+	mux.Handle("GET /signal", transport.Signal(transport.SignalDeps{
+		Hub:             hub,
+		Verifier:        verifier,
+		AllowedOrigins:  cfg.AllowedOrigins,
+		MaxMessageBytes: cfg.MaxSignalMessageBytes,
+		Logger:          logger,
+	}))
 
 	return mux
 }
@@ -250,6 +283,61 @@ func sweepSessions(ctx context.Context, sessions *session.Store, every time.Dura
 					slog.Int("failed", failed),
 					slog.Int("forgotten", forgotten),
 				)
+			}
+		}
+	}
+}
+
+// sessionsAsPairs adapts the session store to the one question the hub asks: who
+// is the other side of this session, and is the asking peer in it at all.
+type sessionsAsPairs struct {
+	sessions *session.Store
+}
+
+func (s sessionsAsPairs) Other(sessionID, peerID string) (string, bool) {
+	held, err := s.sessions.Get(sessionID, peerID)
+	if err != nil || !held.Live() {
+		return "", false
+	}
+	return held.Other(peerID), true
+}
+
+// presence adapts the registry to what the hub reports: a peer opening a channel
+// is a peer that is here.
+type presence struct {
+	peers *registry.Registry
+}
+
+func (p presence) Connected(peerID string) {
+	if _, err := p.peers.Heartbeat(peerID); err != nil {
+		_, _ = p.peers.Register(peerID)
+	}
+}
+
+func (p presence) Disconnected(_ string) {
+	// Nothing. A peer that closed its channel may still be there and still
+	// reporting in; the registry's own window is what decides that.
+}
+
+// refreshPresence keeps every peer holding a channel online, so a connected peer
+// does not have to report in on two mechanisms at once.
+func refreshPresence(ctx context.Context, hub *signaling.Hub, peers *registry.Registry, every time.Duration) {
+	if every <= 0 {
+		every = time.Minute
+	}
+
+	ticker := time.NewTicker(every)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			for _, peerID := range hub.Peers() {
+				if _, err := peers.Heartbeat(peerID); err != nil {
+					_, _ = peers.Register(peerID)
+				}
 			}
 		}
 	}

@@ -19,6 +19,7 @@ import (
 	"github.com/protonspy/dc-streaming-p2p/internal/ice"
 	"github.com/protonspy/dc-streaming-p2p/internal/registry"
 	"github.com/protonspy/dc-streaming-p2p/internal/session"
+	"github.com/protonspy/dc-streaming-p2p/internal/signaling"
 )
 
 // testEnv is the smallest environment that starts the server, bound to a port the
@@ -207,12 +208,12 @@ func TestRoutesAnswersNothingElseYet(t *testing.T) {
 		t.Fatalf("config.Load() error = %v, want nil", err)
 	}
 
-	// Signaling is a later spec; nothing answers for it yet.
+	// The browser SDK is a later spec; nothing is served for it yet.
 	rec := httptest.NewRecorder()
-	testRoutes(t, cfg).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/signal", nil))
+	testRoutes(t, cfg).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/demo", nil))
 
 	if rec.Code != http.StatusNotFound {
-		t.Errorf("GET /signal = %d, want %d until that spec lands", rec.Code, http.StatusNotFound)
+		t.Errorf("GET /demo = %d, want %d until that spec lands", rec.Code, http.StatusNotFound)
 	}
 }
 
@@ -276,7 +277,12 @@ func testRoutes(t *testing.T, cfg config.Config) *http.ServeMux {
 		t.Fatalf("session.New() error = %v, want nil", err)
 	}
 
-	return routes(cfg, clients, issuer, limiter, peers, sessions, iceProvider,
+	hub, err := signaling.New(signaling.Options{Sessions: sessionsAsPairs{sessions}})
+	if err != nil {
+		t.Fatalf("signaling.New() error = %v, want nil", err)
+	}
+
+	return routes(cfg, clients, issuer, limiter, peers, sessions, hub, iceProvider,
 		slog.New(slog.NewTextHandler(io.Discard, nil)))
 }
 
@@ -370,5 +376,19 @@ func TestHealthCountsRegisteredPeers(t *testing.T) {
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
 	if !strings.Contains(rec.Body.String(), `"peers_online":1`) {
 		t.Errorf("health = %s, want one peer online", rec.Body.String())
+	}
+}
+
+func TestRoutesGuardTheSignalingChannel(t *testing.T) {
+	cfg, err := config.Load(testEnv(nil))
+	if err != nil {
+		t.Fatalf("config.Load() error = %v, want nil", err)
+	}
+
+	rec := httptest.NewRecorder()
+	testRoutes(t, cfg).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/signal", nil))
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("GET /signal = %d, want %d without a token", rec.Code, http.StatusUnauthorized)
 	}
 }
