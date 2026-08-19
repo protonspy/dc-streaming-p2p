@@ -29,6 +29,10 @@ is not listed here is an open decision, never something adopted silently.
   than implemented, and fed ephemeral credentials this server signs. See
   `adr:0003-use-an-external-turn-service-with-ephemeral-credentials`.
 
+- **Plain ES modules, in `web/sdk/`** — the SDK has no build step and no
+  dependencies, so a browser loads the same files a developer reads and `node --test`
+  runs them unchanged. What a bundler would buy here is not worth a toolchain.
+
 ## Development
 
 - **go test** — the suite CI gates on; no assertion library, because a failure
@@ -38,6 +42,9 @@ is not listed here is an open decision, never something adopted silently.
   `.golangci.yml`.
 - **gofmt and go vet** — the format and the correctness checks that ship with the
   toolchain, run locally before a task closes and again in CI.
+- **node --test** — the SDK suite, using the runtime's own test runner. No
+  framework, because adding one would mean adding the install step the SDK does not
+  otherwise have.
 - **GitHub Actions** — CI on every push and pull request, in `.github/workflows/ci.yml`.
 - **Docker Compose** — brings the server up against a real coturn with no setup, in
   `deploy/compose.yaml`. The relay path cannot be exercised without a relay.

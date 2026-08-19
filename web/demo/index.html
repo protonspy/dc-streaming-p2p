@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>dc-streaming-p2p — two peers</title>
+    <link rel="stylesheet" href="./demo.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Two peers</h1>
+      <p class="lede">
+        Open this page in two tabs, join as a different client in each, and call the other
+        one. The audio and video go directly between the tabs; this server only helps them
+        find each other.
+      </p>
+
+      <p class="warning">
+        This page holds a client secret, which is public the moment a browser has it.
+        That is fine for a demonstration whose secret is a development value; it is not
+        the pattern to copy. An application authenticates its own user on its own
+        backend, and that backend asks this server for a token — the SDK takes one
+        through <code>getToken</code> and never needs the secret.
+      </p>
+
+      <section class="panel">
+        <h2>Join</h2>
+        <form id="join">
+          <label>
+            Client
+            <select id="client-id">
+              <option value="sdk-web">sdk-web (peer-001)</option>
+              <option value="sdk-web-2">sdk-web-2 (peer-002)</option>
+            </select>
+          </label>
+          <label>
+            Secret
+            <input id="client-secret" type="password" value="development-secret-at-least-32-chars" />
+          </label>
+          <button type="submit" id="join-button">Join</button>
+        </form>
+        <p class="status" id="join-status">Not joined.</p>
+      </section>
+
+      <section class="panel">
+        <h2>Call</h2>
+        <form id="call">
+          <label>
+            Peer
+            <input id="peer-id" value="peer-002" />
+          </label>
+          <button type="submit" id="call-button" disabled>Call</button>
+          <button type="button" id="hangup-button" disabled>Hang up</button>
+        </form>
+        <p class="status" id="call-status">No call.</p>
+      </section>
+
+      <section class="video">
+        <figure>
+          <video id="local" autoplay playsinline muted></video>
+          <figcaption>This tab</figcaption>
+        </figure>
+        <figure>
+          <video id="remote" autoplay playsinline></video>
+          <figcaption>The other one</figcaption>
+        </figure>
+      </section>
+
+      <section class="panel">
+        <h2>What happened</h2>
+        <ol id="log" class="log"></ol>
+      </section>
+    </main>
+
+    <script type="module" src="./demo.js"></script>
+  </body>
+</html>

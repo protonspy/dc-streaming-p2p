@@ -393,3 +393,37 @@ func TestRoutesGuardTheSignalingChannel(t *testing.T) {
 		t.Errorf("GET /signal = %d, want %d without a token", rec.Code, http.StatusUnauthorized)
 	}
 }
+
+func TestTheDemoIsServedOnlyWhenAskedFor(t *testing.T) {
+	off, err := config.Load(testEnv(nil))
+	if err != nil {
+		t.Fatalf("config.Load() error = %v, want nil", err)
+	}
+	rec := httptest.NewRecorder()
+	testRoutes(t, off).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/demo/", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("GET /demo/ = %d, want %d when nobody asked for it", rec.Code, http.StatusNotFound)
+	}
+
+	on, err := config.Load(testEnv(map[string]string{"CENTRAL_SERVE_DEMO": "true"}))
+	if err != nil {
+		t.Fatalf("config.Load() error = %v, want nil", err)
+	}
+	mux := testRoutes(t, on)
+
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/demo/", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /demo/ = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if !strings.Contains(rec.Body.String(), "<title>") {
+		t.Errorf("GET /demo/ served %q, want the page", rec.Body.String()[:min(80, rec.Body.Len())])
+	}
+
+	// The page imports the SDK by a relative path, so both have to be reachable.
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/sdk/client.js", nil))
+	if rec.Code != http.StatusOK {
+		t.Errorf("GET /sdk/client.js = %d, want %d — the page cannot import what is not served", rec.Code, http.StatusOK)
+	}
+}

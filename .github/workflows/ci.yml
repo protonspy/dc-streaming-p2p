@@ -60,6 +60,21 @@ jobs:
       - name: golangci-lint
         run: go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.3.0 run ./...
 
+  sdk:
+    name: sdk tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Plain ES modules and the runtime's own test runner: no install step,
+      # because there is nothing to install.
+      - name: Test
+        run: node --test "web/sdk/*.test.js"
+
   artifacts:
     name: validate
     runs-on: ubuntu-latest
