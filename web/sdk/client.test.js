@@ -581,3 +581,46 @@ test("a retried request keeps the body it was refused with", async () => {
   const reported = server.reportedStates();
   assert.deepEqual(reported, [{ state: "closed" }], "the retry dropped what it was reporting");
 });
+
+test("a channel that never opens is not left held", async () => {
+  FakeSocket.reset();
+  FakePeerConnection.reset();
+
+  const server = new FakeServer();
+  const client = new PeerClient({
+    serverURL: "https://central.example",
+    clientID: "sdk-web",
+    clientSecret: "a-secret-long-enough-for-the-server",
+    fetch: server.fetch,
+    WebSocket: class extends FakeSocket {
+      constructor(url, protocols) {
+        super(url, protocols);
+        this.readyState = 0;
+        // The upgrade fails after the constructor returns, as a browser's does.
+        queueMicrotask(() => this.onerror?.({}));
+      }
+    },
+    RTCPeerConnection: FakePeerConnection,
+    sleep: async () => {},
+  });
+
+  await assert.rejects(() => client.start(), /would not open/);
+  assert.equal(client._socket, null, "a socket that never opened was left held, so nothing will reopen one");
+});
+
+test("a credential refused as a bad request is terminal too", async () => {
+  const { client, server } = await startedClient();
+
+  server.authStatus = 400;
+  client._tokenExpiresAt = Date.now();
+
+  const errors = [];
+  client.on("error", (err) => errors.push(err));
+
+  FakeSocket.last.close();
+  await settle();
+
+  const attempts = server.authCalls;
+  await settle();
+  assert.equal(server.authCalls, attempts, "a credential refused as malformed is being retried forever");
+});

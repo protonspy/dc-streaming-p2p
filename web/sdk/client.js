@@ -382,10 +382,18 @@ export class PeerClient extends Emitter {
     socket.onclose = () => this._onChannelClosed(socket);
 
     if (socket.readyState !== 1) {
-      await new Promise((resolve, reject) => {
-        socket.onopen = resolve;
-        socket.onerror = () => reject(new Error("the signaling channel would not open"));
-      });
+      try {
+        await new Promise((resolve, reject) => {
+          socket.onopen = resolve;
+          socket.onerror = () => reject(new Error("the signaling channel would not open"));
+        });
+      } catch (err) {
+        // A socket that never opened must not be left held: the reconnect loop
+        // reads this to decide whether it still has a channel, and a dead one
+        // there stops it from ever opening a live one.
+        if (this._socket === socket) this._socket = null;
+        throw err;
+      }
     }
 
     this._reconnectAttempt = 0;
