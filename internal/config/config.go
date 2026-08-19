@@ -58,6 +58,12 @@ type Config struct {
 	// is abandoned.
 	NegotiationTimeout time.Duration
 
+	// MaxPeers is the ceiling on how many peers the registry holds at once.
+	MaxPeers int
+	// ExpiryInterval is how often expired peers are swept out, whether or not
+	// anything reads them.
+	ExpiryInterval time.Duration
+
 	// STUNURLs are handed to peers as-is.
 	STUNURLs []string
 	// TURNURLs are the relay endpoints offered to peers. Empty disables the relay.
@@ -137,6 +143,8 @@ func Load(getenv Getenv) (Config, error) {
 		SuspectAfter:       duration("SUSPECT_AFTER", "30s"),
 		OfflineAfter:       duration("OFFLINE_AFTER", "60s"),
 		NegotiationTimeout: duration("NEGOTIATION_TIMEOUT", "2m"),
+		MaxPeers:           whole("MAX_PEERS", "10000"),
+		ExpiryInterval:     duration("EXPIRY_INTERVAL", "15s"),
 		STUNURLs:           splitList(get("STUN_URLS", "stun:stun.l.google.com:19302")),
 		TURNURLs:           splitList(get("TURN_URLS", "")),
 		TURNSecret:         get("TURN_SECRET", ""),
@@ -261,9 +269,10 @@ func containsFold(values []string, want string) bool {
 // leaked signing key.
 func (c Config) String() string {
 	return fmt.Sprintf(
-		"listen=%s issuer=%s token_ttl=%s signing_key=%s clients=%d heartbeat=%s suspect=%s offline=%s negotiation=%s stun=%d relay=%t turn_credential_ttl=%s",
+		"listen=%s issuer=%s token_ttl=%s signing_key=%s clients=%d heartbeat=%s suspect=%s offline=%s negotiation=%s max_peers=%d expiry=%s stun=%d relay=%t turn_credential_ttl=%s",
 		c.ListenAddr, c.Issuer, c.TokenTTL, signingKeyState(c.TokenSigningKey), len(c.Clients), c.HeartbeatInterval,
-		c.SuspectAfter, c.OfflineAfter, c.NegotiationTimeout, len(c.STUNURLs), c.RelayConfigured(), c.TURNCredentialTTL,
+		c.SuspectAfter, c.OfflineAfter, c.NegotiationTimeout, c.MaxPeers, c.ExpiryInterval,
+		len(c.STUNURLs), c.RelayConfigured(), c.TURNCredentialTTL,
 	)
 }
 
