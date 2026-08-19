@@ -18,6 +18,7 @@ import (
 	"github.com/protonspy/dc-streaming-p2p/internal/auth"
 	"github.com/protonspy/dc-streaming-p2p/internal/buildinfo"
 	"github.com/protonspy/dc-streaming-p2p/internal/config"
+	"github.com/protonspy/dc-streaming-p2p/internal/ice"
 	"github.com/protonspy/dc-streaming-p2p/internal/registry"
 	"github.com/protonspy/dc-streaming-p2p/internal/transport"
 )
@@ -99,7 +100,17 @@ func run(ctx context.Context, args []string, getenv config.Getenv, stdout, stder
 		logger.InfoContext(ctx, "peers expired", slog.Int("removed", removed))
 	})
 
-	handler := transport.Chain(routes(cfg, clients, issuer, limiter, peers, logger),
+	iceProvider, err := ice.NewProvider(ice.Options{
+		STUNURLs:      cfg.STUNURLs,
+		TURNURLs:      cfg.TURNURLs,
+		Secret:        cfg.TURNSecret,
+		CredentialTTL: cfg.TURNCredentialTTL,
+	})
+	if err != nil {
+		return err
+	}
+
+	handler := transport.Chain(routes(cfg, clients, issuer, limiter, peers, iceProvider, logger),
 		transport.WithRequestID, transport.WithLogging(logger))
 	srv, err := transport.NewServer(ctx, handler, transport.Options{
 		Addr:            cfg.ListenAddr,
@@ -124,6 +135,7 @@ func routes(
 	issuer *auth.TokenIssuer,
 	limiter *auth.AttemptLimiter,
 	peers *registry.Registry,
+	iceProvider *ice.Provider,
 	logger *slog.Logger,
 ) *http.ServeMux {
 	mux := http.NewServeMux()
@@ -153,6 +165,7 @@ func routes(
 	mux.Handle("DELETE /peers", guard(transport.Peers(peers)))
 	mux.Handle("POST /peers/heartbeat", guard(transport.Heartbeat(peers)))
 	mux.Handle("GET /peers/{id}", guard(transport.PeerLookup(peers)))
+	mux.Handle("GET /ice-config", guard(transport.ICEConfig(iceProvider)))
 
 	return mux
 }

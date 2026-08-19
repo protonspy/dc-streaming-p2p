@@ -109,6 +109,21 @@ func TestNewClientStoreRejects(t *testing.T) {
 			want:    "at least 32",
 		},
 		{
+			name:    "a peer identifier the relay would misread",
+			clients: []ClientConfig{{ID: "sdk-web", PeerID: "peer:001", Secret: secret("a")}},
+			want:    "outside a-z",
+		},
+		{
+			name:    "a peer identifier with a space in it",
+			clients: []ClientConfig{{ID: "sdk-web", PeerID: "peer 001", Secret: secret("a")}},
+			want:    "outside a-z",
+		},
+		{
+			name:    "a peer identifier longer than the limit",
+			clients: []ClientConfig{{ID: "sdk-web", PeerID: strings.Repeat("p", MaxPeerIDLen+1), Secret: secret("a")}},
+			want:    "at most 128",
+		},
+		{
 			name: "the same identifier twice",
 			clients: []ClientConfig{
 				{ID: "sdk-web", PeerID: "peer-001", Secret: secret("a")},
@@ -186,5 +201,15 @@ func TestLenCountsTheConfiguredClients(t *testing.T) {
 	}
 	if got := store.Len(); got != 2 {
 		t.Errorf("Len() = %d, want 2", got)
+	}
+}
+
+func TestPeerIdentifiersThatAreAccepted(t *testing.T) {
+	for _, peerID := range []string{"peer-001", "peer_001", "peer.001", "PEER001", strings.Repeat("p", MaxPeerIDLen)} {
+		t.Run(peerID, func(t *testing.T) {
+			if _, err := NewClientStore([]ClientConfig{{ID: "sdk-web", PeerID: peerID, Secret: secret("a")}}); err != nil {
+				t.Errorf("NewClientStore() error = %v for %q, want nil", err, peerID)
+			}
+		})
 	}
 }

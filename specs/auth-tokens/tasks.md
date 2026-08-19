@@ -16,6 +16,9 @@ ci: wait
   _Depends 1.3_
 - [x] 1.5 (TDD) Refuse a client identifier that fails more often than the allowance within the window, correct credentials included — R1.6
   _Depends 1.1_
+- [x] 1.6 (Unit) Refuse at startup a peer identifier that cannot survive a token claim or a relay username — R4.5
+  _Depends 1.1_
+  _Reason Added after the ICE spec's review found the identifier failing at request time instead, with a 500 the peer cannot act on_
 
 ## 2 · The HTTP surface
 
