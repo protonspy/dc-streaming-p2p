@@ -33,6 +33,7 @@ func valid() map[string]string {
 	return map[string]string{
 		"CENTRAL_TOKEN_SIGNING_KEY": testSigningKey,
 		"CENTRAL_CLIENTS":           testClients,
+		"CENTRAL_ALLOWED_ORIGINS":   AnyOrigin,
 	}
 }
 
@@ -162,6 +163,11 @@ func TestLoadRejects(t *testing.T) {
 			name: "an expiry interval of zero",
 			edit: func(v map[string]string) { v["CENTRAL_EXPIRY_INTERVAL"] = "0s" },
 			want: "EXPIRY_INTERVAL",
+		},
+		{
+			name: "no allowed origins, which must be a decision rather than a default",
+			edit: func(v map[string]string) { delete(v, "CENTRAL_ALLOWED_ORIGINS") },
+			want: "ALLOWED_ORIGINS",
 		},
 		{
 			name: "a listen address with no port",
@@ -384,6 +390,7 @@ func TestLoadReadsTheSigningKeyAndClientsFromFiles(t *testing.T) {
 	cfg, err := Load(env(map[string]string{
 		"CENTRAL_TOKEN_SIGNING_KEY_FILE": keyPath,
 		"CENTRAL_CLIENTS_FILE":           clientsPath,
+		"CENTRAL_ALLOWED_ORIGINS":        AnyOrigin,
 	}))
 	if err != nil {
 		t.Fatalf("Load() error = %v, want nil", err)
@@ -439,5 +446,29 @@ func TestIssuerFallsBackWhenBlank(t *testing.T) {
 	}
 	if cfg.Issuer != "dc-streaming-p2p" {
 		t.Errorf("Issuer = %q, want the default", cfg.Issuer)
+	}
+}
+
+func TestAnyOriginIsAskedForRatherThanAssumed(t *testing.T) {
+	permissive, err := Load(env(valid()))
+	if err != nil {
+		t.Fatalf("Load() error = %v, want nil", err)
+	}
+	if !permissive.AnyOriginAllowed() {
+		t.Error("AnyOriginAllowed() = false for the wildcard, want true")
+	}
+
+	vars := valid()
+	vars["CENTRAL_ALLOWED_ORIGINS"] = "https://app.example"
+	named, err := Load(env(vars))
+	if err != nil {
+		t.Fatalf("Load() error = %v, want nil", err)
+	}
+	if named.AnyOriginAllowed() {
+		t.Error("AnyOriginAllowed() = true for a named origin, want false")
+	}
+
+	if strings.Contains(named.String(), "any_origin=true") {
+		t.Errorf("String() = %q, want it to report the origin decision truthfully", named.String())
 	}
 }

@@ -1,10 +1,12 @@
 package transport
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -22,6 +24,25 @@ type sessionFixture struct {
 	clock *time.Time
 	mux   *http.ServeMux
 	auth  authFixture
+	ended *recordingEnded
+}
+
+// recordingEnded records what the routes said had ended.
+type recordingEnded struct {
+	mu   sync.Mutex
+	told []string
+}
+
+func (r *recordingEnded) SessionEnded(_ context.Context, sessionID, state string, peers ...string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.told = append(r.told, sessionID+":"+state+":"+strings.Join(peers, ","))
+}
+
+func (r *recordingEnded) seen() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.told...)
 }
 
 func newSessionFixture(t *testing.T, opts session.Options) sessionFixture {
@@ -46,14 +67,15 @@ func newSessionFixture(t *testing.T, opts session.Options) sessionFixture {
 
 	auth := newAuthFixture(t, 10)
 	guard := RequireToken(auth.verifier)
+	ended := &recordingEnded{}
 
 	mux := http.NewServeMux()
 	mux.Handle("POST /sessions", guard(OpenSession(store)))
-	mux.Handle("GET /sessions/{id}", guard(GetSession(store)))
-	mux.Handle("DELETE /sessions/{id}", guard(GetSession(store)))
-	mux.Handle("POST /sessions/{id}/state", guard(ReportSession(store)))
+	mux.Handle("GET /sessions/{id}", guard(GetSession(store, ended)))
+	mux.Handle("DELETE /sessions/{id}", guard(GetSession(store, ended)))
+	mux.Handle("POST /sessions/{id}/state", guard(ReportSession(store, ended)))
 
-	return sessionFixture{store: store, clock: &clock, mux: mux, auth: auth}
+	return sessionFixture{store: store, clock: &clock, mux: mux, auth: auth, ended: ended}
 }
 
 func (f sessionFixture) do(t *testing.T, method, path, peerID, body string) *httptest.ResponseRecorder {
@@ -380,7 +402,7 @@ func TestGetSessionRefusesAMethodItDoesNotServe(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPut, "/sessions/"+opened.SessionID, nil)
 	req.Header.Set("Authorization", "Bearer "+token.Value)
 	rec := httptest.NewRecorder()
-	RequireToken(f.auth.verifier)(GetSession(f.store)).ServeHTTP(rec, req)
+	RequireToken(f.auth.verifier)(GetSession(f.store, nil)).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Errorf("PUT = %d, want %d", rec.Code, http.StatusMethodNotAllowed)
@@ -402,5 +424,31 @@ func TestOpenAnswersTheCallerAtItsOwnLimitDistinctly(t *testing.T) {
 	}
 	if got := decodeError(t, rec); got != codePeerSessions {
 		t.Errorf("error = %q, want %q", got, codePeerSessions)
+	}
+}
+
+func TestEndingASessionTellsBothPeers(t *testing.T) {
+	f := newSessionFixture(t, session.Options{})
+
+	opened := f.open(t, "peer-001", "peer-002")
+	f.do(t, http.MethodDelete, "/sessions/"+opened.SessionID, "peer-001", "")
+
+	told := f.ended.seen()
+	if len(told) != 1 {
+		t.Fatalf("the channel was told %v, want one ending", told)
+	}
+	if !strings.Contains(told[0], "closed") || !strings.Contains(told[0], "peer-002") {
+		t.Errorf("told %q, want the state and both peers named", told[0])
+	}
+}
+
+func TestAReportThatDoesNotEndASessionTellsNobody(t *testing.T) {
+	f := newSessionFixture(t, session.Options{})
+
+	opened := f.open(t, "peer-001", "peer-002")
+	f.do(t, http.MethodPost, "/sessions/"+opened.SessionID+"/state", "peer-001", `{"state":"connected","path":"direct"}`)
+
+	if told := f.ended.seen(); len(told) != 0 {
+		t.Errorf("the channel was told %v about a session that is still live", told)
 	}
 }

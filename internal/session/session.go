@@ -353,13 +353,14 @@ func (s *Store) Report(id, reportedBy string, state State, path Path) (Session, 
 }
 
 // ClosePeer ends every session a peer was in, which is what happens when it leaves
-// the registry. It reports how many it closed.
-func (s *Store) ClosePeer(peerID string) int {
+// the registry. It reports the sessions it closed, so the peer still holding a
+// channel can be told rather than left waiting.
+func (s *Store) ClosePeer(peerID string) []Session {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	now := s.now()
-	var closed int
+	var closed []Session
 
 	for id, held := range s.sessions {
 		if !held.Has(peerID) {
@@ -378,7 +379,7 @@ func (s *Store) ClosePeer(peerID string) int {
 		held.ChangedAt = now
 		s.sessions[id] = held
 		s.endedLocked(held)
-		closed++
+		closed = append(closed, held)
 	}
 
 	return closed

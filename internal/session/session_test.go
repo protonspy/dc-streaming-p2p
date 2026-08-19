@@ -384,8 +384,8 @@ func TestClosePeerEndsEverySessionItWasIn(t *testing.T) {
 		t.Fatalf("Open() error = %v", err)
 	}
 
-	if closed := store.ClosePeer("peer-001"); closed != 2 {
-		t.Errorf("ClosePeer() closed %d, want 2", closed)
+	if closed := store.ClosePeer("peer-001"); len(closed) != 2 {
+		t.Errorf("ClosePeer() closed %v, want both sessions named so the far side can be told", closed)
 	}
 
 	for _, id := range []string{first.ID, second.ID} {
@@ -418,8 +418,8 @@ func TestClosePeerLeavesEndedSessionsAlone(t *testing.T) {
 		t.Fatalf("Report() error = %v", err)
 	}
 
-	if closed := store.ClosePeer("peer-001"); closed != 0 {
-		t.Errorf("ClosePeer() closed %d, want 0 — a failed session is not reopened to be closed", closed)
+	if closed := store.ClosePeer("peer-001"); len(closed) != 0 {
+		t.Errorf("ClosePeer() closed %v, want none — a failed session is not reopened to be closed", closed)
 	}
 	held, err := store.Get(opened.ID, "peer-001")
 	if err != nil {
@@ -747,8 +747,8 @@ func TestClosePeerDoesNotRelabelATimedOutSession(t *testing.T) {
 	// stored state still says negotiating.
 	*clock = clock.Add(90 * time.Second)
 
-	if closed := store.ClosePeer("peer-001"); closed != 0 {
-		t.Errorf("ClosePeer() closed %d, want 0 — the session had already failed", closed)
+	if closed := store.ClosePeer("peer-001"); len(closed) != 0 {
+		t.Errorf("ClosePeer() closed %v, want none — the session had already failed", closed)
 	}
 
 	held, err := store.Get(opened.ID, "peer-001")
