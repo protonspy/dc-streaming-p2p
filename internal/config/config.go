@@ -74,6 +74,10 @@ type Config struct {
 	// anything reads them.
 	ExpiryInterval time.Duration
 
+	// ServeDemo serves the browser SDK and the demonstration page from this
+	// binary. Off unless asked for: a deployment has no reason to serve a page
+	// whose whole purpose is to exercise the server.
+	ServeDemo bool
 	// MaxSignalMessageBytes bounds one signaling message.
 	MaxSignalMessageBytes int64
 	// SignalMessagesPerWindow and SignalWindow are how many messages one channel
@@ -170,6 +174,7 @@ func Load(getenv Getenv) (Config, error) {
 		MaxSessionsPerPeer: whole("MAX_SESSIONS_PER_PEER", "64"),
 		SessionRetention:   duration("SESSION_RETENTION", "10m"),
 		ExpiryInterval:     duration("EXPIRY_INTERVAL", "15s"),
+		ServeDemo:          get("SERVE_DEMO", "false") == "true",
 
 		MaxSignalMessageBytes:   int64(whole("MAX_SIGNAL_MESSAGE_BYTES", "131072")),
 		SignalMessagesPerWindow: whole("SIGNAL_MESSAGES_PER_WINDOW", "120"),

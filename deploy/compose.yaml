@@ -47,7 +47,8 @@ services:
       # reaches a browser.
       CENTRAL_TURN_SECRET: development-turn-secret
       CENTRAL_TURN_CREDENTIAL_TTL: "10m"
-      CENTRAL_ALLOWED_ORIGINS: "http://localhost:8080"
+      CENTRAL_ALLOWED_ORIGINS: "*"
+      CENTRAL_SERVE_DEMO: "true"
     depends_on:
       - coturn
 

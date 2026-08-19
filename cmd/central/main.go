@@ -24,6 +24,7 @@ import (
 	"github.com/protonspy/dc-streaming-p2p/internal/session"
 	"github.com/protonspy/dc-streaming-p2p/internal/signaling"
 	"github.com/protonspy/dc-streaming-p2p/internal/transport"
+	"github.com/protonspy/dc-streaming-p2p/web"
 )
 
 func main() {
@@ -85,6 +86,12 @@ func run(ctx context.Context, args []string, getenv config.Getenv, stdout, stder
 	if cfg.AnyOriginAllowed() {
 		logger.WarnContext(ctx, "every origin may open a signaling channel",
 			slog.String("setting", config.Prefix+"ALLOWED_ORIGINS"),
+		)
+	}
+
+	if cfg.ServeDemo {
+		logger.InfoContext(ctx, "serving the demonstration page",
+			slog.String("path", "/demo/"),
 		)
 	}
 
@@ -243,6 +250,14 @@ func routes(
 		signalDeps.AllowedOrigins = cfg.AllowedOrigins
 	}
 	mux.Handle("GET /signal", transport.Signal(signalDeps))
+
+	if cfg.ServeDemo {
+		// The page and the SDK are served from one tree so that the page can
+		// import the SDK by the same relative path it has on disk.
+		assets := http.FileServerFS(web.FS())
+		mux.Handle("GET /demo/", assets)
+		mux.Handle("GET /sdk/", assets)
+	}
 
 	return mux
 }
