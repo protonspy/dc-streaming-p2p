@@ -13,6 +13,12 @@ is not listed here is an open decision, never something adopted silently.
   that a framework would be the larger dependency.
 - **log/slog, from the standard library** — structured logs with no dependency, and
   the handler interface is what lets the tests read the log as data.
+- **golang-jwt/jwt/v5** — issues and parses the tokens. The parsing side is where
+  token implementations fail silently, so a library that has been attacked in public
+  is worth more than the sixty lines it replaces. See
+  `adr:0006-sign-tokens-with-ed25519-and-publish-the-public-key`.
+- **crypto/ed25519, from the standard library** — the signature itself; the library
+  above only frames it.
 - **WebRTC, in the browser** — the media path is the browser's own implementation;
   the server holds no track and no peer connection. See
   `adr:0001-split-control-plane-from-data-plane`.

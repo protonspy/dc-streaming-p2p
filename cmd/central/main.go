@@ -15,6 +15,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/protonspy/dc-streaming-p2p/internal/auth"
 	"github.com/protonspy/dc-streaming-p2p/internal/buildinfo"
 	"github.com/protonspy/dc-streaming-p2p/internal/config"
 	"github.com/protonspy/dc-streaming-p2p/internal/transport"
@@ -63,7 +64,26 @@ func run(ctx context.Context, args []string, getenv config.Getenv, stdout, stder
 
 	logger.InfoContext(ctx, "starting", slog.String("build", buildinfo.String()), slog.String("config", cfg.String()))
 
-	handler := transport.Chain(routes(cfg), transport.WithRequestID, transport.WithLogging(logger))
+	clients, err := auth.NewClientStore(cfg.Clients)
+	if err != nil {
+		return err
+	}
+	issuer, err := auth.NewTokenIssuer(cfg.TokenSigningKey, cfg.Issuer, cfg.TokenTTL)
+	if err != nil {
+		return err
+	}
+	limiter, err := auth.NewAttemptLimiter(cfg.AuthMaxFailures, cfg.AuthFailureWindow)
+	if err != nil {
+		return err
+	}
+
+	logger.InfoContext(ctx, "authentication ready",
+		slog.Int("clients", clients.Len()),
+		slog.String("key_id", transport.KeyID(issuer.PublicKey())),
+	)
+
+	handler := transport.Chain(routes(cfg, clients, issuer, limiter, logger),
+		transport.WithRequestID, transport.WithLogging(logger))
 	srv, err := transport.NewServer(ctx, handler, transport.Options{
 		Addr:            cfg.ListenAddr,
 		ShutdownTimeout: cfg.ShutdownTimeout,
@@ -81,12 +101,30 @@ func run(ctx context.Context, args []string, getenv config.Getenv, stdout, stder
 //
 // The health counters are wired as they arrive: until the registry and the session
 // store exist, the endpoint reports the zeroes that are the truth.
-func routes(cfg config.Config) *http.ServeMux {
+func routes(
+	cfg config.Config,
+	clients *auth.ClientStore,
+	issuer *auth.TokenIssuer,
+	limiter *auth.AttemptLimiter,
+	logger *slog.Logger,
+) *http.ServeMux {
 	mux := http.NewServeMux()
+
 	mux.Handle("GET /healthz", transport.Health(transport.HealthDeps{
 		RelayConfigured: cfg.RelayConfigured(),
 		Build:           buildinfo.String(),
 	}))
+
+	// Both of these are unauthenticated, and have to be: one is where a peer gets
+	// its token, and the other is what it pins before it will send a credential.
+	mux.Handle("POST /auth", transport.Auth(transport.AuthDeps{
+		Clients: clients,
+		Issuer:  issuer,
+		Limiter: limiter,
+		Logger:  logger,
+	}))
+	mux.Handle("GET /.well-known/jwks.json", transport.JWKS(issuer.PublicKey()))
+
 	return mux
 }
 
