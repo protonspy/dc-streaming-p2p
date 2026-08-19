@@ -245,10 +245,11 @@ func (r *Registry) Count() Counts {
 	return counts
 }
 
-// Expire removes every peer past the offline window, and reports how many went. It
-// is called on a ticker rather than only when a record is read, so that a peer
-// nobody asks about still leaves.
-func (r *Registry) Expire() int {
+// Expire removes every peer past the offline window and reports which ones went.
+// It is called on a ticker rather than only when a record is read, so that a peer
+// nobody asks about still leaves — and it names them because whatever holds
+// sessions has to know which peers stopped being there.
+func (r *Registry) Expire() []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -256,12 +257,12 @@ func (r *Registry) Expire() int {
 }
 
 // expireLocked is Expire with the lock already held.
-func (r *Registry) expireLocked(now time.Time) int {
-	var removed int
+func (r *Registry) expireLocked(now time.Time) []string {
+	var removed []string
 	for id, held := range r.peers {
 		if r.stateOf(held, now) == Gone {
 			delete(r.peers, id)
-			removed++
+			removed = append(removed, id)
 		}
 	}
 	return removed
@@ -286,7 +287,7 @@ func (r *Registry) stateOf(held record, now time.Time) State {
 // that nothing asks about would sit in the map and in the health count forever.
 //
 // It blocks, so the caller decides where it runs and when it stops.
-func (r *Registry) Sweep(ctx context.Context, every time.Duration, onExpired func(int)) {
+func (r *Registry) Sweep(ctx context.Context, every time.Duration, onExpired func([]string)) {
 	if every <= 0 {
 		every = r.heartbeat
 	}
@@ -299,7 +300,7 @@ func (r *Registry) Sweep(ctx context.Context, every time.Duration, onExpired fun
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if removed := r.Expire(); removed > 0 && onExpired != nil {
+			if removed := r.Expire(); len(removed) > 0 && onExpired != nil {
 				onExpired(removed)
 			}
 		}

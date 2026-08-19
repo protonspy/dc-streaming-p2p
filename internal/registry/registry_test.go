@@ -272,8 +272,8 @@ func TestExpireRemovesWithoutBeingAsked(t *testing.T) {
 	}
 	*clock = clock.Add(2 * time.Minute)
 
-	if removed := reg.Expire(); removed != 3 {
-		t.Errorf("Expire() = %d, want 3", removed)
+	if removed := reg.Expire(); len(removed) != 3 {
+		t.Errorf("Expire() = %v, want three peers named", removed)
 	}
 	if got := reg.Count().Total; got != 0 {
 		t.Errorf("Total = %d after expiry, want 0", got)
@@ -291,8 +291,9 @@ func TestExpireLeavesLivePeersAlone(t *testing.T) {
 		t.Fatalf("Register() error = %v", err)
 	}
 
-	if removed := reg.Expire(); removed != 1 {
-		t.Errorf("Expire() = %d, want 1", removed)
+	removed := reg.Expire()
+	if len(removed) != 1 || removed[0] != "stale" {
+		t.Errorf("Expire() = %v, want the stale peer alone — whatever holds sessions needs to know which peer went", removed)
 	}
 	if _, ok := reg.Lookup("fresh"); !ok {
 		t.Error("Expire() removed a peer that had just reported in")
@@ -401,20 +402,20 @@ func TestSweepExpiresWithoutBeingRead(t *testing.T) {
 		t.Fatalf("Register() error = %v", err)
 	}
 
-	expired := make(chan int, 1)
+	expired := make(chan []string, 1)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go reg.Sweep(ctx, time.Millisecond, func(n int) {
+	go reg.Sweep(ctx, time.Millisecond, func(ids []string) {
 		select {
-		case expired <- n:
+		case expired <- ids:
 		default:
 		}
 	})
 
 	select {
-	case n := <-expired:
-		if n != 1 {
-			t.Errorf("Sweep() reported %d expired, want 1", n)
+	case ids := <-expired:
+		if len(ids) != 1 || ids[0] != "peer-001" {
+			t.Errorf("Sweep() reported %v, want the peer that expired", ids)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("Sweep() never expired a record nobody read")

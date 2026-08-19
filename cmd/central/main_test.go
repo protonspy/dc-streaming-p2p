@@ -18,6 +18,7 @@ import (
 	"github.com/protonspy/dc-streaming-p2p/internal/config"
 	"github.com/protonspy/dc-streaming-p2p/internal/ice"
 	"github.com/protonspy/dc-streaming-p2p/internal/registry"
+	"github.com/protonspy/dc-streaming-p2p/internal/session"
 )
 
 // testEnv is the smallest environment that starts the server, bound to a port the
@@ -206,12 +207,12 @@ func TestRoutesAnswersNothingElseYet(t *testing.T) {
 		t.Fatalf("config.Load() error = %v, want nil", err)
 	}
 
-	// Sessions and signaling are later specs; nothing answers for them yet.
+	// Signaling is a later spec; nothing answers for it yet.
 	rec := httptest.NewRecorder()
-	testRoutes(t, cfg).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/sessions", nil))
+	testRoutes(t, cfg).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/signal", nil))
 
 	if rec.Code != http.StatusNotFound {
-		t.Errorf("GET /sessions = %d, want %d until that spec lands", rec.Code, http.StatusNotFound)
+		t.Errorf("GET /signal = %d, want %d until that spec lands", rec.Code, http.StatusNotFound)
 	}
 }
 
@@ -264,7 +265,19 @@ func testRoutes(t *testing.T, cfg config.Config) *http.ServeMux {
 		t.Fatalf("ice.NewProvider() error = %v, want nil", err)
 	}
 
-	return routes(cfg, clients, issuer, limiter, peers, iceProvider, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	sessions, err := session.New(session.Options{
+		NegotiationTimeout: cfg.NegotiationTimeout,
+		Retention:          cfg.SessionRetention,
+		MaxSessions:        cfg.MaxSessions,
+		MaxSessionsPerPeer: cfg.MaxSessionsPerPeer,
+		Peers:              reachable{peers},
+	})
+	if err != nil {
+		t.Fatalf("session.New() error = %v, want nil", err)
+	}
+
+	return routes(cfg, clients, issuer, limiter, peers, sessions, iceProvider,
+		slog.New(slog.NewTextHandler(io.Discard, nil)))
 }
 
 func TestRoutesServesTheKeySetAndTheAuthEndpoint(t *testing.T) {
@@ -307,6 +320,10 @@ func TestRoutesGuardTheRegistry(t *testing.T) {
 		{method: http.MethodPost, path: "/peers/heartbeat"},
 		{method: http.MethodGet, path: "/peers/peer-001"},
 		{method: http.MethodGet, path: "/ice-config"},
+		{method: http.MethodPost, path: "/sessions"},
+		{method: http.MethodGet, path: "/sessions/anything"},
+		{method: http.MethodDelete, path: "/sessions/anything"},
+		{method: http.MethodPost, path: "/sessions/anything/state"},
 	} {
 		t.Run(route.method+" "+route.path, func(t *testing.T) {
 			rec := httptest.NewRecorder()
