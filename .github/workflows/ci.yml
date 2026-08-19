@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: build · test · vet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Format check
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "not gofmt'd:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -race -count=1 ./...
+
+  lint:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Built from source with this repository's own toolchain rather than
+      # installed as a prebuilt binary: the released binaries are built with an
+      # older Go than go.mod targets, and golangci-lint refuses to run in that
+      # direction. Slower, and it is the only version that can read this config.
+      - name: golangci-lint
+        run: go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.3.0 run ./...
+
+  artifacts:
+    name: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # The specs, the plan, and the knowledge base are graded too: a task with no
+      # methodology or a citation that no longer resolves fails here.
+      - name: scc validate
+        run: npx --yes @protonspy/scc@0.15.0 validate
