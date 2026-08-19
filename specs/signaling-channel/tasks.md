@@ -32,7 +32,7 @@ ci: wait
   _Reason The security review found an unset value quietly allowing every origin_
 - [x] 2.3 (Unit) Keep a connected peer online in the registry, and close a channel that stops answering the heartbeat — R3.1, R3.2
   _Depends 2.1_
-- [x] 2.4 (Unit) Bound every write with a deadline, so a peer that stops reading cannot hold up the peer writing to it — R2.4
+- [x] 2.4 (Unit) Bound every write with a deadline, so a peer that stops reading cannot hold up the peer writing to it — R2.8
   _Depends 2.1_
 - [x] 2.5 (Unit) Tell both peers when a session ends, and wire the channel count into health — R3.3, R3.4
   _Depends 2.1, 1.7_

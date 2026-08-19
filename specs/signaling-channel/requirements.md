@@ -34,6 +34,7 @@ registry should stop hearing from.
 - **R2.5** The control plane shall carry the payload of a signaling message without reading it.
 - **R2.6** If a message is larger than the configured maximum, then the control plane shall refuse it and shall close the connection that sent it.
 - **R2.7** If a peer sends more messages than the configured allowance within the configured window, then the control plane shall refuse the excess and shall keep the connection open.
+- **R2.8** If a peer does not accept a delivery within the configured send timeout, then the control plane shall close that peer's channel rather than make the sending peer wait.
 
 ## R3 · Keeping the channel honest
 

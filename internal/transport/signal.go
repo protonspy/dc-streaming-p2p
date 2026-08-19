@@ -180,7 +180,11 @@ func keepAlive(ctx context.Context, conn *websocket.Conn, interval, timeout time
 			err := conn.Ping(pingCtx)
 			cancel()
 			if err != nil {
-				_ = conn.Close(websocket.StatusPolicyViolation, "no answer to the heartbeat")
+				// Dropped rather than closed politely: a peer that did not answer
+				// a ping will not complete a close handshake either, and waiting
+				// for one holds the connection open for as long as the handshake
+				// takes to give up.
+				_ = conn.CloseNow()
 				return
 			}
 		}

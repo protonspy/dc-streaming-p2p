@@ -46,6 +46,13 @@ type signalFixture struct {
 func newSignalFixture(t *testing.T, origins []string) signalFixture {
 	t.Helper()
 
+	return newSignalFixtureWith(t, SignalDeps{AllowedOrigins: origins, AllowAnyOrigin: len(origins) == 0})
+}
+
+// newSignalFixtureWith builds the endpoint with limits a test chooses.
+func newSignalFixtureWith(t *testing.T, deps SignalDeps) signalFixture {
+	t.Helper()
+
 	hub, err := signaling.New(signaling.Options{
 		Sessions: pairedSessions{"sess-1": {"peer-001", "peer-002"}},
 	})
@@ -54,13 +61,13 @@ func newSignalFixture(t *testing.T, origins []string) signalFixture {
 	}
 
 	auth := newAuthFixture(t, 10)
-	handler := Signal(SignalDeps{
-		Hub:            hub,
-		Verifier:       auth.verifier,
-		AllowedOrigins: origins,
-		PingInterval:   time.Hour,
-		Logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
-	})
+	deps.Hub = hub
+	deps.Verifier = auth.verifier
+	if deps.PingInterval == 0 {
+		deps.PingInterval = time.Hour
+	}
+	deps.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	handler := Signal(deps)
 
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
@@ -319,4 +326,48 @@ func TestSignalCloseReasonIsBounded(t *testing.T) {
 	// A close frame carries at most 123 bytes; a longer reason must be cut rather
 	// than making the close fail.
 	channel.Close(strings.Repeat("x", 200))
+}
+
+func TestAMessagePastTheLimitClosesTheConnection(t *testing.T) {
+	f := newSignalFixtureWith(t, SignalDeps{AllowAnyOrigin: true, MaxMessageBytes: 1 << 10})
+
+	conn := f.dial(t, "peer-001")
+	waitForChannels(t, f.hub, 1)
+
+	// Well past the limit, and nothing like signaling.
+	huge := signaling.Message{
+		Type:      signaling.Offer,
+		SessionID: "sess-1",
+		Payload:   json.RawMessage(`"` + strings.Repeat("x", 4<<10) + `"`),
+	}
+	// The write itself may succeed — the server refuses on read — so what is
+	// asserted is that the channel does not survive it.
+	_ = wsjson.Write(context.Background(), conn, huge)
+
+	waitForChannels(t, f.hub, 0)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	var reply signaling.Message
+	if err := wsjson.Read(ctx, conn, &reply); err == nil {
+		t.Errorf("the channel is still readable after a message past the limit, and answered %+v", reply)
+	}
+}
+
+func TestAChannelThatStopsAnsweringTheHeartbeatIsClosed(t *testing.T) {
+	f := newSignalFixtureWith(t, SignalDeps{
+		AllowAnyOrigin: true,
+		PingInterval:   20 * time.Millisecond,
+		PongTimeout:    50 * time.Millisecond,
+	})
+
+	conn := f.dial(t, "peer-001")
+	waitForChannels(t, f.hub, 1)
+
+	// A WebSocket client answers pings from inside its read loop, so a peer that
+	// never reads is exactly a peer whose process is wedged: the socket is open
+	// and nobody is home. Nothing here reads from conn.
+	waitForChannels(t, f.hub, 0)
+
+	_ = conn.CloseNow()
 }
