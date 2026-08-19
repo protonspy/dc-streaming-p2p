@@ -29,8 +29,10 @@ gofmt -l .        # prints the files that are not formatted; empty output is the
 `golangci-lint` is not installed locally; CI runs it and it is the gate before merge.
 Locally `go vet ./...` plus `gofmt -l .` is what a task closes on.
 
-The browser SDK lives in `web/sdk/` and has its own commands once it exists; until
-`specs/web-sdk/` opens, `go` is the whole toolchain.
+```bash
+# The browser SDK — plain ES modules, no install step
+node --test "web/sdk/*.test.js"
+```
 
 ## Conventions
 

@@ -15,11 +15,31 @@ services:
       CENTRAL_LISTEN_ADDR: ":8080"
       # Development values. Anything real comes from the deployment's own secret
       # store: this file is committed and everything in it is public.
-      CENTRAL_TOKEN_SIGNING_KEY: development-signing-key-32-characters
+      #
+      # The signing key is a base64 Ed25519 seed — `openssl rand -base64 32`
+      # prints one. The public half is served at /.well-known/jwks.json and is
+      # what a client pins.
+      CENTRAL_TOKEN_SIGNING_KEY: ZGV2ZWxvcG1lbnQtb25seS1zaWduaW5nLXNlZWQtMzI=
       CENTRAL_TOKEN_TTL: "1h"
+      CENTRAL_ISSUER: dc-streaming-p2p-dev
+      CENTRAL_CLIENTS: >-
+        [{"client_id":"sdk-web","peer_id":"peer-001",
+        "secret":"development-secret-at-least-32-chars"},
+        {"client_id":"sdk-web-2","peer_id":"peer-002",
+        "secret":"development-secret-at-least-32-char2"}]
+      CENTRAL_AUTH_MAX_FAILURES: "10"
+      CENTRAL_AUTH_FAILURE_WINDOW: "5m"
       CENTRAL_HEARTBEAT_INTERVAL: "15s"
       CENTRAL_SUSPECT_AFTER: "30s"
       CENTRAL_OFFLINE_AFTER: "60s"
+      CENTRAL_MAX_PEERS: "10000"
+      CENTRAL_MAX_SESSIONS: "10000"
+      CENTRAL_MAX_SESSIONS_PER_PEER: "64"
+      CENTRAL_MAX_SIGNAL_MESSAGE_BYTES: "131072"
+      CENTRAL_SIGNAL_MESSAGES_PER_WINDOW: "120"
+      CENTRAL_SIGNAL_WINDOW: "1m"
+      CENTRAL_SESSION_RETENTION: "10m"
+      CENTRAL_EXPIRY_INTERVAL: "15s"
       CENTRAL_STUN_URLS: "stun:${TURN_HOST:-127.0.0.1}:3478"
       CENTRAL_TURN_URLS: "turn:${TURN_HOST:-127.0.0.1}:3478"
       # Matches static-auth-secret in coturn/turnserver.conf. The central server
@@ -27,7 +47,11 @@ services:
       # reaches a browser.
       CENTRAL_TURN_SECRET: development-turn-secret
       CENTRAL_TURN_CREDENTIAL_TTL: "10m"
+      # The demonstration page is served from this server, so this is the origin
+      # it is opened from. The wildcard is accepted and warned about; it is not
+      # what this file should teach.
       CENTRAL_ALLOWED_ORIGINS: "http://localhost:8080"
+      CENTRAL_SERVE_DEMO: "true"
     depends_on:
       - coturn
 

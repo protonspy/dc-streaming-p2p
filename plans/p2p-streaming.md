@@ -2,7 +2,7 @@
 autonomy: auto
 ci: wait
 status: approved
-checksum: 7dd1d765f4cc61b7b69aeec5a3fc156928b1c0f9931f4422cfbff9712fd3ad75
+checksum: 499838a95ab98d22b8fc274d5817c6a2286ba9ea1f0f364db64c695cadf57931
 ---
 
 # P2P streaming
@@ -57,7 +57,7 @@ survives a peer disappearing without a goodbye.
   _Depends 1.2_
 - [x] 1.4 (Unit) Expose a health endpoint reporting registry size and live session count
   _Depends 1.3_
-- [ ] 2.1 (Unit) Serve a two-browser demo page that captures audio and video and calls the SDK
+- [x] 2.1 (Unit) Serve a two-browser demo page that captures audio and video and calls the SDK
   _Depends 1.3_
 - [x] 2.2 (Unit) Add the CI workflow — build, test, vet, and lint on every push
   _Depends 1.1_

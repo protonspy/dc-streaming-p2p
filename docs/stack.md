@@ -13,12 +13,25 @@ is not listed here is an open decision, never something adopted silently.
   that a framework would be the larger dependency.
 - **log/slog, from the standard library** — structured logs with no dependency, and
   the handler interface is what lets the tests read the log as data.
+- **golang-jwt/jwt/v5** — issues and parses the tokens. The parsing side is where
+  token implementations fail silently, so a library that has been attacked in public
+  is worth more than the sixty lines it replaces. See
+  `adr:0006-sign-tokens-with-ed25519-and-publish-the-public-key`.
+- **crypto/ed25519, from the standard library** — the signature itself; the library
+  above only frames it.
+- **coder/websocket** — the signaling channel. Context-aware reads and writes, no
+  dependencies of its own, and an origin check and subprotocol negotiation built in,
+  which is what the token in the subprotocol needs.
 - **WebRTC, in the browser** — the media path is the browser's own implementation;
   the server holds no track and no peer connection. See
   `adr:0001-split-control-plane-from-data-plane`.
 - **coturn, external** — the relay for calls with no direct path, configured rather
   than implemented, and fed ephemeral credentials this server signs. See
   `adr:0003-use-an-external-turn-service-with-ephemeral-credentials`.
+
+- **Plain ES modules, in `web/sdk/`** — the SDK has no build step and no
+  dependencies, so a browser loads the same files a developer reads and `node --test`
+  runs them unchanged. What a bundler would buy here is not worth a toolchain.
 
 ## Development
 
@@ -29,6 +42,9 @@ is not listed here is an open decision, never something adopted silently.
   `.golangci.yml`.
 - **gofmt and go vet** — the format and the correctness checks that ship with the
   toolchain, run locally before a task closes and again in CI.
+- **node --test** — the SDK suite, using the runtime's own test runner. No
+  framework, because adding one would mean adding the install step the SDK does not
+  otherwise have.
 - **GitHub Actions** — CI on every push and pull request, in `.github/workflows/ci.yml`.
 - **Docker Compose** — brings the server up against a real coturn with no setup, in
   `deploy/compose.yaml`. The relay path cannot be exercised without a relay.

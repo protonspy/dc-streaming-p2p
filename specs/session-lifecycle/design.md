@@ -1,40 +1,103 @@
+---
+autonomy: auto
+ci: wait
+---
+
 # Session lifecycle — design
-
-<!-- The design must fit the decision being made. Every heading below except
-     "What changes" is OPTIONAL: delete the ones this change does not decide.
-
-     A heading filled with "N/A", or with prose written to satisfy the heading, is
-     worse than an absent heading — the next session reads invented architecture as
-     a decision somebody made, and honors it. Filler becomes binding.
-
-     Delete this comment too. -->
 
 ## What changes
 
-Serves R1.1.
+Serves R1.1 through R4.2.
 
-<!-- Required. What changes, where, and why. For a change that decides nothing
-     structural, this section is the whole design and that is the correct outcome.
+A new package `internal/session`: the records, the state machine, and the
+authorization decision. `internal/transport` gains the routes that open a session,
+read one, report what happened to it, and close it. The health endpoint's session
+counter, wired to zero since the foundation, is connected here.
 
-     Keep the "Serves" line above and make it real: the design has to name the
-     requirements it answers, or the trace from what to how is unreadable — and
-     `scc spec validate` says so. -->
+## Boundaries and contracts
 
-## Boundaries and contracts <!-- optional -->
+| Route | What it does |
+|---|---|
+| `POST /sessions` | opens a session to the peer named in the body |
+| `GET /sessions/{id}` | reports a session to a peer in it |
+| `POST /sessions/{id}/state` | reports connected, failed, or closed |
+| `DELETE /sessions/{id}` | closes it |
 
-<!-- Only if this change moves a boundary or an external contract, and only for the
-     parts that actually move. -->
+The body of `POST /sessions` names the peer being *called*, which is the one
+identifier that legitimately comes from a request: the caller is the token, the
+callee is what the caller asked for.
 
-## Data <!-- optional -->
+A caller that is not in a session is answered `404`, the same as one asking about a
+session that never existed — a session identifier is not a capability, and the
+difference would let a peer discover who is talking to whom.
 
-<!-- Only if a data shape changes. -->
+## Data
 
-## Alternatives considered <!-- optional -->
+```
+session id → { caller, callee, state, path, opened at, changed at }
+```
 
-<!-- Only where there were real alternatives with trade-offs. Say which won and why.
-     If the decision is hard to reverse, write an ADR under docs/adr/ and cite it
-     here instead of arguing it twice. -->
+State is stored here, unlike the registry's, because it does not follow from a
+clock: it follows from what a peer reported. What *is* derived is the failure at the
+negotiation timeout — a session still negotiating past it is failed whether or not
+anything swept it yet, exactly as an expired peer is gone whether or not the sweeper
+has run.
 
-## Risks <!-- optional -->
+```
+negotiating ──reports connected──▶ connected ──close──▶ closed
+     │                                  │
+     ├──reports failed──▶ failed ◀──────┘ (the timeout reaches only negotiating)
+     └──close──▶ closed
+```
 
-<!-- What could go wrong that the task list does not already cover. -->
+Anything else is refused and the session is left as it was — R4.2. A connected
+session cannot become negotiating again: a renegotiation is the same session
+carrying on, and the SDK reports the path it ended up on rather than the states it
+passed through.
+
+The path is `direct` or `relayed`, reported by the peer because only the peer knows
+which candidate pair won. It is observability: nothing in the control plane behaves
+differently for one or the other, and a peer that lies about it changes nothing
+except a number on a dashboard.
+
+## Authorization
+
+One decision, in one place: an authorizer that answers whether a caller may reach a
+callee. The implementation this spec ships allows any authenticated peer to reach
+any registered peer, which is what the first deployments need and what the demo
+requires.
+
+It is an interface rather than a condition inside a handler because the honest
+alternative is worse: a policy scattered across handlers is one somebody will forget
+to apply. Contact lists, rooms, or an external decision all replace this one
+implementation without touching a route. R1.4 is written so that a refusal by policy
+is indistinguishable from a peer that does not exist, which is the property that
+survives whatever policy comes later.
+
+## Bounds
+
+Three, all of them because the store is shared and one caller must not be able to
+make everybody else slow:
+
+- **Live count and per-peer index are maintained, never scanned.** The health
+  endpoint is unauthenticated and reads the live count, so a scan there is a
+  stranger making every peer wait on the mutex.
+- **A peer holds at most so many live sessions.** Without it, one caller occupies a
+  slot against every peer it can reach, and none of them agreed to anything. A peer
+  at its cap settles what it is holding first, so a session that quietly timed out
+  does not keep its place — that costs the cap, not the map.
+- **Retained records are bounded.** Ended sessions stay readable for their
+  retention, which is deliberate; growing without limit while a caller opens and
+  closes in a loop is not. Past the bound the oldest ended record is dropped, which
+  costs a pop rather than a search.
+
+## Risks
+
+Two peers opening a session to each other at the same instant would make two
+sessions, and R1.7 makes that one: the pair is looked up under a key that does not
+depend on which of them asked first. That lookup and the insert happen under one
+lock, so the race resolves rather than duplicating.
+
+A session outlives the peers in it if nothing removes it — which is why R2.6 exists,
+and why the registry's expiry notifies the session store rather than the session
+store polling the registry.

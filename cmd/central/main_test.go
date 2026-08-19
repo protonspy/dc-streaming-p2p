@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -12,15 +14,23 @@ import (
 	"testing"
 	"time"
 
+	"github.com/protonspy/dc-streaming-p2p/internal/auth"
 	"github.com/protonspy/dc-streaming-p2p/internal/config"
+	"github.com/protonspy/dc-streaming-p2p/internal/ice"
+	"github.com/protonspy/dc-streaming-p2p/internal/registry"
+	"github.com/protonspy/dc-streaming-p2p/internal/session"
+	"github.com/protonspy/dc-streaming-p2p/internal/signaling"
 )
 
 // testEnv is the smallest environment that starts the server, bound to a port the
 // operating system picks.
 func testEnv(overrides map[string]string) func(string) string {
 	vars := map[string]string{
-		"CENTRAL_TOKEN_SIGNING_KEY": strings.Repeat("k", 32),
-		"CENTRAL_LISTEN_ADDR":       "127.0.0.1:0",
+		"CENTRAL_TOKEN_SIGNING_KEY": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte("k"), 32)),
+		"CENTRAL_CLIENTS": `[{"client_id":"sdk-web","peer_id":"peer-001","secret":"` +
+			strings.Repeat("s", 32) + `"}]`,
+		"CENTRAL_LISTEN_ADDR":     "127.0.0.1:0",
+		"CENTRAL_ALLOWED_ORIGINS": "*",
 	}
 	for k, v := range overrides {
 		vars[k] = v
@@ -62,7 +72,7 @@ func TestRunRejectsAnUnknownLogFormat(t *testing.T) {
 
 func TestRunReportsABadConfiguration(t *testing.T) {
 	var out, errOut bytes.Buffer
-	env := testEnv(map[string]string{"CENTRAL_TOKEN_SIGNING_KEY": "too-short"})
+	env := testEnv(map[string]string{"CENTRAL_TOKEN_SIGNING_KEY": "not base64!"})
 
 	err := run(context.Background(), nil, env, &out, &errOut)
 	if err == nil {
@@ -183,7 +193,7 @@ func TestRoutesServesTheHealthCheck(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	routes(cfg).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	testRoutes(t, cfg).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET /healthz = %d, want %d", rec.Code, http.StatusOK)
@@ -199,11 +209,12 @@ func TestRoutesAnswersNothingElseYet(t *testing.T) {
 		t.Fatalf("config.Load() error = %v, want nil", err)
 	}
 
+	// The browser SDK is a later spec; nothing is served for it yet.
 	rec := httptest.NewRecorder()
-	routes(cfg).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/peers", nil))
+	testRoutes(t, cfg).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/demo", nil))
 
 	if rec.Code != http.StatusNotFound {
-		t.Errorf("GET /peers = %d, want %d until the specs land", rec.Code, http.StatusNotFound)
+		t.Errorf("GET /demo = %d, want %d until that spec lands", rec.Code, http.StatusNotFound)
 	}
 }
 
@@ -216,5 +227,203 @@ func TestRunHelpIsNotAFailure(t *testing.T) {
 	}
 	if !strings.Contains(errOut.String(), "-version") {
 		t.Errorf("run(-help) wrote %q, want the usage", errOut.String())
+	}
+}
+
+// testRoutes builds the router the way run() does, from a loaded configuration.
+func testRoutes(t *testing.T, cfg config.Config) *http.ServeMux {
+	t.Helper()
+
+	clients, err := auth.NewClientStore(cfg.Clients)
+	if err != nil {
+		t.Fatalf("NewClientStore() error = %v, want nil", err)
+	}
+	issuer, err := auth.NewTokenIssuer(cfg.TokenSigningKey, cfg.Issuer, cfg.TokenTTL)
+	if err != nil {
+		t.Fatalf("NewTokenIssuer() error = %v, want nil", err)
+	}
+	limiter, err := auth.NewAttemptLimiter(cfg.AuthMaxFailures, cfg.AuthFailureWindow)
+	if err != nil {
+		t.Fatalf("NewAttemptLimiter() error = %v, want nil", err)
+	}
+
+	peers, err := registry.New(registry.Options{
+		HeartbeatInterval: cfg.HeartbeatInterval,
+		SuspectAfter:      cfg.SuspectAfter,
+		OfflineAfter:      cfg.OfflineAfter,
+		MaxPeers:          cfg.MaxPeers,
+	})
+	if err != nil {
+		t.Fatalf("registry.New() error = %v, want nil", err)
+	}
+
+	iceProvider, err := ice.NewProvider(ice.Options{
+		STUNURLs:      cfg.STUNURLs,
+		TURNURLs:      cfg.TURNURLs,
+		Secret:        cfg.TURNSecret,
+		CredentialTTL: cfg.TURNCredentialTTL,
+	})
+	if err != nil {
+		t.Fatalf("ice.NewProvider() error = %v, want nil", err)
+	}
+
+	sessions, err := session.New(session.Options{
+		NegotiationTimeout: cfg.NegotiationTimeout,
+		Retention:          cfg.SessionRetention,
+		MaxSessions:        cfg.MaxSessions,
+		MaxSessionsPerPeer: cfg.MaxSessionsPerPeer,
+		Peers:              reachable{peers},
+	})
+	if err != nil {
+		t.Fatalf("session.New() error = %v, want nil", err)
+	}
+
+	hub, err := signaling.New(signaling.Options{Sessions: sessionsAsPairs{sessions}})
+	if err != nil {
+		t.Fatalf("signaling.New() error = %v, want nil", err)
+	}
+
+	return routes(cfg, clients, issuer, limiter, peers, sessions, hub, iceProvider,
+		slog.New(slog.NewTextHandler(io.Discard, nil)))
+}
+
+func TestRoutesServesTheKeySetAndTheAuthEndpoint(t *testing.T) {
+	cfg, err := config.Load(testEnv(nil))
+	if err != nil {
+		t.Fatalf("config.Load() error = %v, want nil", err)
+	}
+	mux := testRoutes(t, cfg)
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/.well-known/jwks.json", nil))
+	if rec.Code != http.StatusOK {
+		t.Errorf("GET /.well-known/jwks.json = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if !strings.Contains(rec.Body.String(), "Ed25519") {
+		t.Errorf("key set = %q, want the published Ed25519 key", rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	body := `{"client_id":"sdk-web","client_secret":"` + strings.Repeat("s", 32) + `"}`
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/auth", strings.NewReader(body)))
+	if rec.Code != http.StatusOK {
+		t.Errorf("POST /auth = %d, want %d — body %s", rec.Code, http.StatusOK, rec.Body)
+	}
+}
+
+func TestRoutesGuardTheRegistry(t *testing.T) {
+	cfg, err := config.Load(testEnv(nil))
+	if err != nil {
+		t.Fatalf("config.Load() error = %v, want nil", err)
+	}
+	mux := testRoutes(t, cfg)
+
+	for _, route := range []struct {
+		method string
+		path   string
+	}{
+		{method: http.MethodPost, path: "/peers"},
+		{method: http.MethodDelete, path: "/peers"},
+		{method: http.MethodPost, path: "/peers/heartbeat"},
+		{method: http.MethodGet, path: "/peers/peer-001"},
+		{method: http.MethodGet, path: "/ice-config"},
+		{method: http.MethodPost, path: "/sessions"},
+		{method: http.MethodGet, path: "/sessions/anything"},
+		{method: http.MethodDelete, path: "/sessions/anything"},
+		{method: http.MethodPost, path: "/sessions/anything/state"},
+	} {
+		t.Run(route.method+" "+route.path, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, httptest.NewRequest(route.method, route.path, nil))
+
+			if rec.Code != http.StatusUnauthorized {
+				t.Errorf("status = %d, want %d without a token", rec.Code, http.StatusUnauthorized)
+			}
+		})
+	}
+}
+
+func TestHealthCountsRegisteredPeers(t *testing.T) {
+	cfg, err := config.Load(testEnv(nil))
+	if err != nil {
+		t.Fatalf("config.Load() error = %v, want nil", err)
+	}
+	mux := testRoutes(t, cfg)
+
+	// Authenticate as the configured client, then register with the token it gave.
+	rec := httptest.NewRecorder()
+	body := `{"client_id":"sdk-web","client_secret":"` + strings.Repeat("s", 32) + `"}`
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/auth", strings.NewReader(body)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /auth = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var issued struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &issued); err != nil {
+		t.Fatalf("token body %q is not JSON: %v", rec.Body.String(), err)
+	}
+
+	register := httptest.NewRequest(http.MethodPost, "/peers", nil)
+	register.Header.Set("Authorization", "Bearer "+issued.Token)
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, register)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /peers = %d, want %d — body %s", rec.Code, http.StatusOK, rec.Body)
+	}
+
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	if !strings.Contains(rec.Body.String(), `"peers_online":1`) {
+		t.Errorf("health = %s, want one peer online", rec.Body.String())
+	}
+}
+
+func TestRoutesGuardTheSignalingChannel(t *testing.T) {
+	cfg, err := config.Load(testEnv(nil))
+	if err != nil {
+		t.Fatalf("config.Load() error = %v, want nil", err)
+	}
+
+	rec := httptest.NewRecorder()
+	testRoutes(t, cfg).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/signal", nil))
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("GET /signal = %d, want %d without a token", rec.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestTheDemoIsServedOnlyWhenAskedFor(t *testing.T) {
+	off, err := config.Load(testEnv(nil))
+	if err != nil {
+		t.Fatalf("config.Load() error = %v, want nil", err)
+	}
+	rec := httptest.NewRecorder()
+	testRoutes(t, off).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/demo/", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("GET /demo/ = %d, want %d when nobody asked for it", rec.Code, http.StatusNotFound)
+	}
+
+	on, err := config.Load(testEnv(map[string]string{"CENTRAL_SERVE_DEMO": "true"}))
+	if err != nil {
+		t.Fatalf("config.Load() error = %v, want nil", err)
+	}
+	mux := testRoutes(t, on)
+
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/demo/", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /demo/ = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if !strings.Contains(rec.Body.String(), "<title>") {
+		t.Errorf("GET /demo/ served %q, want the page", rec.Body.String()[:min(80, rec.Body.Len())])
+	}
+
+	// The page imports the SDK by a relative path, so both have to be reachable.
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/sdk/client.js", nil))
+	if rec.Code != http.StatusOK {
+		t.Errorf("GET /sdk/client.js = %d, want %d — the page cannot import what is not served", rec.Code, http.StatusOK)
 	}
 }

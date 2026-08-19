@@ -17,6 +17,29 @@ Desktop, host networking is emulated and the relay may advertise an address the
 browser cannot reach — a relayed call that fails there has not necessarily failed
 in the field, and one that succeeds has not proven it works behind a real NAT.
 
+The signing key is an Ed25519 seed in base64. Generate a real one with:
+
+```bash
+openssl rand -base64 32
+```
+
+The public half is served at `/.well-known/jwks.json`, and a client that pins the
+key compares what it gets there against the copy it was configured with. Clients
+themselves come from `CENTRAL_CLIENTS` as JSON, or from a file named by
+`CENTRAL_CLIENTS_FILE` — the file is the better one for anything real, because an
+environment variable is readable by anything that can list the process.
+
+`CENTRAL_ALLOWED_ORIGINS` has no default: the server refuses to start without it.
+The compose file sets `*` because a development page is served from wherever you
+happen to open it; a deployment lists the origins its own application is served
+from, and the server warns at startup whenever the wildcard is in use.
+
+This stack serves plain HTTP, which is why the Go client needs
+`WithInsecureTransport()` to talk to it. A deployment terminates TLS in front of the
+server: pinning the published key stops another server from impersonating this one,
+and does nothing at all about somebody reading the credential off the wire — and the
+credential is sent before there is any token to protect it.
+
 Every secret in these files is a development value, committed on purpose so the
 stack starts with no setup. A deployment takes `CENTRAL_TOKEN_SIGNING_KEY` and
 `CENTRAL_TURN_SECRET` from its own secret store, and the TURN secret has to be the

@@ -121,6 +121,7 @@ func TestHealthReportsNoIdentities(t *testing.T) {
 	want := map[string]bool{
 		"status": true, "build": true, "uptime_seconds": true,
 		"peers_online": true, "sessions_live": true, "relay_configured": true,
+		"channels_open": true,
 	}
 	for key := range raw {
 		if !want[key] {

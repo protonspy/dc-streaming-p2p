@@ -17,6 +17,8 @@ type HealthDeps struct {
 	PeersOnline func() int
 	// SessionsLive is how many sessions are negotiating or connected.
 	SessionsLive func() int
+	// ChannelsOpen is how many signaling channels are open.
+	ChannelsOpen func() int
 	// RelayConfigured says whether peers can be offered a relay at all. False
 	// means a peer with no direct path has nowhere to fall back to.
 	RelayConfigured bool
@@ -34,6 +36,7 @@ type healthResponse struct {
 	UptimeSeconds   int64  `json:"uptime_seconds"`
 	PeersOnline     int    `json:"peers_online"`
 	SessionsLive    int    `json:"sessions_live"`
+	ChannelsOpen    int    `json:"channels_open"`
 	RelayConfigured bool   `json:"relay_configured"`
 }
 
@@ -60,6 +63,7 @@ func Health(deps HealthDeps) http.Handler {
 			UptimeSeconds:   int64(now().Sub(started).Seconds()),
 			PeersOnline:     count(deps.PeersOnline),
 			SessionsLive:    count(deps.SessionsLive),
+			ChannelsOpen:    count(deps.ChannelsOpen),
 			RelayConfigured: deps.RelayConfigured,
 		}
 

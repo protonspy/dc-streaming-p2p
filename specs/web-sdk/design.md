@@ -1,40 +1,103 @@
-# Web sdk — design
+---
+autonomy: auto
+ci: wait
+---
 
-<!-- The design must fit the decision being made. Every heading below except
-     "What changes" is OPTIONAL: delete the ones this change does not decide.
-
-     A heading filled with "N/A", or with prose written to satisfy the heading, is
-     worse than an absent heading — the next session reads invented architecture as
-     a decision somebody made, and honors it. Filler becomes binding.
-
-     Delete this comment too. -->
+# Web SDK — design
 
 ## What changes
 
-Serves R1.1.
+Serves R1.1 through R3.3.
 
-<!-- Required. What changes, where, and why. For a change that decides nothing
-     structural, this section is the whole design and that is the correct outcome.
+`web/sdk/` — plain ES modules, no build step and no dependencies. A browser loads
+them directly, and so does `node --test`, which is what makes them testable at all.
 
-     Keep the "Serves" line above and make it real: the design has to name the
-     requirements it answers, or the trace from what to how is unreadable — and
-     `scc spec validate` says so. -->
+The server gains one route, `GET /demo/`, serving that directory and a page that
+opens two calls in two tabs. It is behind no token: the page is what *gets* a token.
 
-## Boundaries and contracts <!-- optional -->
+## Boundaries and contracts
 
-<!-- Only if this change moves a boundary or an external contract, and only for the
-     parts that actually move. -->
+```js
+const client = new PeerClient({
+  serverURL: "https://central.example",
+  clientID: "sdk-web",
+  clientSecret: "…",
+  publicKey: "…",          // optional; refuses any other, before authenticating
+});
 
-## Data <!-- optional -->
+await client.start();                       // authenticate, register, connect
+const call = await client.call("peer-002", { localStream });
+call.on("track", (stream) => { … });        // the far side's media
+call.on("state", ({ state, path }) => { … });
+await call.close();
+```
 
-<!-- Only if a data shape changes. -->
+`state` is one of `connecting`, `connected`, `failed`, `closed` — what an
+application acts on. Nothing carries a session description or a candidate outward:
+those exist between `RTCPeerConnection` and the signaling channel and nowhere else.
 
-## Alternatives considered <!-- optional -->
+**A client secret in a browser is public.** Anyone who loads the page reads it out
+of the source or the network tab, and from then on they are that client. So the
+credential pair is for an identity that *is* the deployment — a kiosk, a device, the
+demonstration page — and never one per tenant or per user. For anything else the
+application authenticates its own user on its own backend, that backend asks this
+control plane for a token, and `getToken` hands the browser the token alone. The
+SDK needs no secret in that shape, and the demonstration page is not the pattern to
+copy.
 
-<!-- Only where there were real alternatives with trade-offs. Say which won and why.
-     If the decision is hard to reverse, write an ADR under docs/adr/ and cite it
-     here instead of arguing it twice. -->
+A credential the server refuses is terminal. Reopening a channel retries a token
+that expired; it does not retry a secret that was rejected, because that will not
+start working without somebody changing it, and a client retrying every thirty
+seconds forever is a failure nobody is told about.
 
-## Risks <!-- optional -->
+## Data
 
-<!-- What could go wrong that the task list does not already cover. -->
+The SDK holds one signaling channel and a call per session:
+
+```
+session id → { peerConnection, remoteStream, state, path }
+```
+
+The far side of a call is decided by who asked. The peer that called sends the
+offer; the peer that was called answers the offer that arrives — which is R2.5, and
+is why a call object exists before the application has been told about it.
+
+The path is read from the selected candidate pair once the connection settles:
+`relay` on either end means relayed, anything else is direct. It is reported to the
+application and to the control plane, and nothing branches on it.
+
+## What the browser is, and what a test replaces
+
+Everything the SDK touches from outside is injected, defaulting to what a browser
+has:
+
+| What | Default | In a test |
+|---|---|---|
+| `fetch` | the browser's | a function answering the control plane's routes |
+| `WebSocket` | the browser's | a fake pair of sockets connected to each other |
+| `RTCPeerConnection` | the browser's | a fake that records what it was told and fires what a test wants |
+
+That is the whole of the seam, and it is what lets the SDK's own logic — the order
+of the calls, who offers, what happens when the channel drops — be tested without a
+browser or a network. It is not a mock of WebRTC's semantics: the tests assert what
+the SDK does, and what WebRTC does with a session description is not this codebase's
+to verify.
+
+## Reconnecting
+
+The channel is reopened with a delay that doubles, capped, with jitter, until the
+application closes the client. Calls in progress are *not* torn down when the
+channel drops: an established peer connection does not need the server, and
+`adr:0001-split-control-plane-from-data-plane` is why. A call still negotiating when
+the channel drops fails, because it cannot finish.
+
+Jitter matters more than the backoff: a server restarting has every peer reconnect
+at once, and identical timers turn one restart into a second outage.
+
+## Risks
+
+A token expiring mid-call is handled by obtaining another, but the signaling channel
+carries the token it opened with — the server does not re-check it, so a channel
+outlives its token by design. That is a deliberate trade: re-authenticating a live
+socket means dropping and reopening it, which costs a real call to close a window
+that requires stealing a token to exploit.
