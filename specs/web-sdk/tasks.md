@@ -15,6 +15,10 @@ ci: wait
 - [x] 1.4 (Unit) Obtain another token when the one held expires, without the application acting — R1.6
   _Depends 1.2_
 
+- [x] 1.5 (Unit) Take a token from the application instead of a secret, and stop reopening the channel when a credential is refused outright — R1.7, R1.8
+  _Depends 1.3_
+  _Reason The security review found a browser holding a client secret with nothing saying that makes it public, and a refused credential retried forever_
+
 ## 2 · Calling
 
 - [x] 2.1 (TDD) Open a session and negotiate as the calling side: offer, candidates, answer — R2.1, R2.2

@@ -47,7 +47,10 @@ services:
       # reaches a browser.
       CENTRAL_TURN_SECRET: development-turn-secret
       CENTRAL_TURN_CREDENTIAL_TTL: "10m"
-      CENTRAL_ALLOWED_ORIGINS: "*"
+      # The demonstration page is served from this server, so this is the origin
+      # it is opened from. The wildcard is accepted and warned about; it is not
+      # what this file should teach.
+      CENTRAL_ALLOWED_ORIGINS: "http://localhost:8080"
       CENTRAL_SERVE_DEMO: "true"
     depends_on:
       - coturn

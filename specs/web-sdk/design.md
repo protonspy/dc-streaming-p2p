@@ -36,6 +36,20 @@ await call.close();
 application acts on. Nothing carries a session description or a candidate outward:
 those exist between `RTCPeerConnection` and the signaling channel and nowhere else.
 
+**A client secret in a browser is public.** Anyone who loads the page reads it out
+of the source or the network tab, and from then on they are that client. So the
+credential pair is for an identity that *is* the deployment — a kiosk, a device, the
+demonstration page — and never one per tenant or per user. For anything else the
+application authenticates its own user on its own backend, that backend asks this
+control plane for a token, and `getToken` hands the browser the token alone. The
+SDK needs no secret in that shape, and the demonstration page is not the pattern to
+copy.
+
+A credential the server refuses is terminal. Reopening a channel retries a token
+that expired; it does not retry a secret that was rejected, because that will not
+start working without somebody changing it, and a client retrying every thirty
+seconds forever is a failure nobody is told about.
+
 ## Data
 
 The SDK holds one signaling channel and a call per session:

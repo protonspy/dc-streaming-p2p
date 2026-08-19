@@ -15,6 +15,14 @@
         find each other.
       </p>
 
+      <p class="warning">
+        This page holds a client secret, which is public the moment a browser has it.
+        That is fine for a demonstration whose secret is a development value; it is not
+        the pattern to copy. An application authenticates its own user on its own
+        backend, and that backend asks this server for a token — the SDK takes one
+        through <code>getToken</code> and never needs the secret.
+      </p>
+
       <section class="panel">
         <h2>Join</h2>
         <form id="join">

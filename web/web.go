@@ -11,7 +11,10 @@ import (
 	"io/fs"
 )
 
-//go:embed demo sdk
+// The tests and their fakes are deliberately not embedded: what a browser needs
+// is the client, and a deployment should not serve test scaffolding.
+//
+//go:embed demo sdk/client.js
 var files embed.FS
 
 // FS is the asset tree, rooted so that a request for /demo/index.html finds

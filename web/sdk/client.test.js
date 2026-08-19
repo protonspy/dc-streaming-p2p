@@ -433,3 +433,151 @@ test("a listener that throws does not stop the others", async () => {
 
   assert.equal(reached.length, 1, "one listener throwing stopped the next");
 });
+
+test("a negotiation that throws leaves no call behind", async () => {
+  const { client, server } = await startedClient();
+
+  // Restored rather than deleted: deleting takes the class's own method with it.
+  const realCreateOffer = FakePeerConnection.prototype.createOffer;
+  FakePeerConnection.prototype.createOffer = async function () {
+    throw new Error("negotiation blew up");
+  };
+
+  await assert.rejects(() => client.call("peer-002"), /negotiation blew up/);
+  await settle();
+
+  assert.equal(client.calls.length, 0, "a call nobody can reach was left open");
+  assert.equal(FakePeerConnection.last.closed, true, "its connection was left open");
+  assert.deepEqual(server.reportedStates(), [{ state: "failed" }], "the control plane was not told");
+
+  FakePeerConnection.prototype.createOffer = realCreateOffer;
+});
+
+test("an offer that cannot be answered leaves no call behind", async () => {
+  const { client, server } = await startedClient();
+
+  const realSetRemote = FakePeerConnection.prototype.setRemoteDescription;
+  FakePeerConnection.prototype.setRemoteDescription = async function () {
+    throw new Error("bad offer");
+  };
+
+  const errors = [];
+  client.on("error", (err) => errors.push(err));
+
+  FakeSocket.last.deliver({
+    type: "offer",
+    session_id: "sess-9",
+    from: "peer-002",
+    payload: { type: "offer", sdp: "v=0 nonsense" },
+  });
+  await settle();
+
+  assert.equal(errors.length, 1);
+  assert.equal(client.calls.length, 0, "a call that could not be answered was left open");
+  assert.deepEqual(server.reportedStates(), [{ state: "failed" }]);
+
+  FakePeerConnection.prototype.setRemoteDescription = realSetRemote;
+});
+
+test("closing while a reconnect is in flight leaves nothing open", async () => {
+  const { client, server } = await startedClient({ sleep: async () => {} });
+
+  // Drop the channel, then close the client while it is reopening.
+  FakeSocket.last.close();
+  await client.close();
+  await settle();
+
+  assert.equal(client.calls.length, 0);
+  assert.equal(FakeSocket.last.closed, true, "a closed client was left holding a socket");
+
+  const registrations = server.sentTo("/peers", "POST").length;
+  const deregistrations = server.sentTo("/peers", "DELETE").length;
+  assert.ok(
+    deregistrations >= 1,
+    "a closed client kept its registration",
+  );
+  assert.ok(
+    registrations <= deregistrations + 1,
+    `registered ${registrations} times and deregistered ${deregistrations}; a closed client re-registered`,
+  );
+});
+
+test("a credential the server refuses stops the reconnect loop", async () => {
+  const { client, server } = await startedClient();
+
+  server.authStatus = 401;
+  // The token it holds is spent, so reconnecting has to authenticate again.
+  client._tokenExpiresAt = Date.now();
+
+  const errors = [];
+  client.on("error", (err) => errors.push(err));
+
+  FakeSocket.last.close();
+  await settle();
+
+  assert.ok(errors.some((err) => err instanceof AuthError), "the refusal was not reported");
+  const attempts = server.authCalls;
+  await settle();
+  assert.equal(server.authCalls, attempts, "a refused credential is being retried forever");
+});
+
+test("a token can come from the application rather than a secret in the page", async () => {
+  FakeSocket.reset();
+  FakePeerConnection.reset();
+
+  const server = new FakeServer();
+  let asked = 0;
+
+  const client = new PeerClient({
+    serverURL: "https://central.example",
+    clientID: null,
+    clientSecret: null,
+    getToken: async () => {
+      asked += 1;
+      return {
+        token: "from-the-application",
+        peer_id: "peer-001",
+        expires_at: new Date(Date.now() + 3600_000).toISOString(),
+      };
+    },
+    fetch: server.fetch,
+    WebSocket: FakeSocket,
+    RTCPeerConnection: FakePeerConnection,
+  });
+
+  await client.start();
+
+  assert.equal(asked, 1);
+  assert.equal(server.sentTo("/auth").length, 0, "a secret was sent despite the application supplying the token");
+  assert.deepEqual(FakeSocket.last.protocols, [SUBPROTOCOL, TOKEN_PREFIX + "from-the-application"]);
+});
+
+test("a client with neither a secret nor a token source is refused", () => {
+  assert.throws(
+    () => new PeerClient({ serverURL: "https://central.example" }),
+    /no credentials/,
+  );
+});
+
+test("a retried request keeps the body it was refused with", async () => {
+  const { client, server } = await startedClient();
+
+  const call = await client.call("peer-002");
+
+  // The next request is refused once, so the SDK re-authenticates and repeats it.
+  let refusals = 0;
+  const underlying = server.fetch;
+  const refuseOnce = async (url, init) => {
+    if (new URL(url).pathname.endsWith("/state") && refusals === 0) {
+      refusals += 1;
+      return { status: 401, ok: false, json: async () => ({ error: "token_expired" }) };
+    }
+    return underlying(url, init);
+  };
+  client._fetch = refuseOnce;
+
+  await call.close();
+
+  const reported = server.reportedStates();
+  assert.deepEqual(reported, [{ state: "closed" }], "the retry dropped what it was reporting");
+});

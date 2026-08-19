@@ -23,6 +23,8 @@ application is told which happened, and does nothing differently either way.
 - **R1.4** The SDK shall keep its registration and its channel open until the application closes it.
 - **R1.5** If the signaling channel closes while the application has not closed it, then the SDK shall reopen it, waiting longer between attempts as they keep failing.
 - **R1.6** If a token expires while the SDK is running, then the SDK shall obtain another and carry on without the application acting.
+- **R1.7** Where the application supplies tokens itself, the SDK shall use them and shall never ask for a client secret.
+- **R1.8** If the control plane refuses a credential outright, then the SDK shall stop reopening its channel and shall report that it stopped.
 
 ## R2 · Calling
 

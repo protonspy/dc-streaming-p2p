@@ -126,10 +126,22 @@ export class Call extends Emitter {
  */
 export class PeerClient extends Emitter {
   /**
+   * A client secret handed to a browser is public. Anyone who loads the page can
+   * read it out of the network tab or the source, and from then on they are that
+   * client: they can register peers, open sessions, and obtain tokens as it. Use
+   * clientID/clientSecret only where the identity is the deployment itself — a
+   * kiosk, a device, a demo — and never one per tenant or per user.
+   *
+   * The alternative is `getToken`: your application authenticates its own user on
+   * its own backend, that backend asks this control plane for a token, and the
+   * browser holds only the token. Nothing here needs the secret if you do that.
+   *
    * @param {object} options
    * @param {string} options.serverURL      where the control plane is
-   * @param {string} options.clientID       the configured client
-   * @param {string} options.clientSecret   its secret
+   * @param {string} [options.clientID]     the configured client
+   * @param {string} [options.clientSecret] its secret — public once it is in a browser
+   * @param {() => Promise<{token: string, peer_id: string, expires_at: string}>} [options.getToken]
+   *   asked for a token instead, so the browser never holds a secret
    * @param {string} [options.publicKey]    the key it must publish, base64url
    * @param {typeof fetch} [options.fetch]
    * @param {typeof WebSocket} [options.WebSocket]
@@ -141,8 +153,9 @@ export class PeerClient extends Emitter {
     super();
     const {
       serverURL,
-      clientID,
-      clientSecret,
+      clientID = null,
+      clientSecret = null,
+      getToken = null,
       publicKey = null,
       fetch: fetchImpl = globalThis.fetch?.bind(globalThis),
       WebSocket: WebSocketImpl = globalThis.WebSocket,
@@ -152,13 +165,16 @@ export class PeerClient extends Emitter {
     } = options ?? {};
 
     if (!serverURL) throw new Error("no server URL");
-    if (!clientID || !clientSecret) throw new Error("no credentials");
+    if (!getToken && (!clientID || !clientSecret)) {
+      throw new Error("no credentials: pass clientID and clientSecret, or getToken");
+    }
 
     this.serverURL = serverURL.replace(/\/+$/, "");
     this.peerId = null;
 
     this._clientID = clientID;
     this._clientSecret = clientSecret;
+    this._getToken = getToken;
     this._expectedKey = publicKey;
     this._fetch = fetchImpl;
     this._WebSocket = WebSocketImpl;
@@ -193,6 +209,11 @@ export class PeerClient extends Emitter {
       await this._closeCall(call, CallState.Closed);
     }
 
+    await this._tearDown();
+  }
+
+  /** Drops the channel and the registration, whoever asked. */
+  async _tearDown() {
     if (this._socket) {
       const socket = this._socket;
       this._socket = null;
@@ -220,9 +241,17 @@ export class PeerClient extends Emitter {
 
     this._addTracks(call, localStream);
 
-    const offer = await call._connection.createOffer();
-    await call._connection.setLocalDescription(offer);
-    this._send({ type: "offer", session_id: call.sessionId, payload: offer });
+    try {
+      const offer = await call._connection.createOffer();
+      await call._connection.setLocalDescription(offer);
+      this._send({ type: "offer", session_id: call.sessionId, payload: offer });
+    } catch (err) {
+      // Negotiating can fail before any connection state exists to watch. The
+      // caller is about to see the exception and will never hold this call, so
+      // it is closed here or it is never closed at all.
+      await this._closeCall(call, CallState.Failed);
+      throw err;
+    }
 
     return call;
   }
@@ -244,6 +273,16 @@ export class PeerClient extends Emitter {
   async _authenticate() {
     await this._verifyServerKey();
 
+    if (this._getToken) {
+      // The application fetched this from its own backend, which is the shape
+      // that keeps a secret out of the browser entirely.
+      const issued = await this._getToken();
+      this._token = issued.token;
+      this._tokenExpiresAt = Date.parse(issued.expires_at);
+      this.peerId = issued.peer_id;
+      return;
+    }
+
     const response = await this._fetch(`${this.serverURL}/auth`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -255,7 +294,11 @@ export class PeerClient extends Emitter {
 
     if (!response.ok) {
       const body = await response.json().catch(() => ({}));
-      throw new AuthError(body.error ?? String(response.status));
+      const refusal = new AuthError(body.error ?? String(response.status));
+      // A credential the server refuses will not start working on its own, so
+      // whoever is retrying is told to stop rather than told to wait.
+      refusal.terminal = response.status === 401 || response.status === 400;
+      throw refusal;
     }
 
     const issued = await response.json();
@@ -295,7 +338,7 @@ export class PeerClient extends Emitter {
   }
 
   /** One authenticated request, refreshing the token when it has run out. */
-  async _request(method, path, body = null) {
+  async _request(method, path, body = null, retried = false) {
     await this._refreshTokenIfNeeded();
 
     const response = await this._fetch(`${this.serverURL}${path}`, {
@@ -307,11 +350,13 @@ export class PeerClient extends Emitter {
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
 
-    if (response.status === 401) {
+    if (response.status === 401 && !retried) {
       // The token was refused rather than merely old. One retry with a fresh one
-      // covers a clock that drifted; a second failure is a real refusal.
+      // covers a clock that drifted; a second failure is a real refusal — and the
+      // body goes with it, or the retry is a different request from the one that
+      // was refused.
       await this._authenticate();
-      return this._request(method, path);
+      return this._request(method, path, body, true);
     }
     if (!response.ok) {
       const failed = await response.json().catch(() => ({}));
@@ -373,8 +418,22 @@ export class PeerClient extends Emitter {
         await this._refreshTokenIfNeeded();
         await this._register();
         await this._openChannel();
+
+        if (this._closed) {
+          // close() ran while this attempt was in flight, so what it just
+          // reopened has to be undone: otherwise a closed client is left holding
+          // a socket and a registration it asked to give up.
+          await this._tearDown();
+          return;
+        }
       } catch (err) {
         this.emit("error", err);
+        if (err?.terminal) {
+          // Retrying a refused credential every thirty seconds forever is not
+          // resilience; it is a failure nobody is told about.
+          this._closed = true;
+          return;
+        }
       }
     }
   }
@@ -429,11 +488,15 @@ export class PeerClient extends Emitter {
   async _onOffer(message) {
     const call = this._callFor(message.session_id, message.from, false);
 
-    await call._connection.setRemoteDescription(message.payload);
-    const answer = await call._connection.createAnswer();
-    await call._connection.setLocalDescription(answer);
-
-    this._send({ type: "answer", session_id: call.sessionId, payload: answer });
+    try {
+      await call._connection.setRemoteDescription(message.payload);
+      const answer = await call._connection.createAnswer();
+      await call._connection.setLocalDescription(answer);
+      this._send({ type: "answer", session_id: call.sessionId, payload: answer });
+    } catch (err) {
+      await this._closeCall(call, CallState.Failed);
+      throw err;
+    }
   }
 
   async _onAnswer(message) {
