@@ -29,7 +29,8 @@ func testEnv(overrides map[string]string) func(string) string {
 		"CENTRAL_TOKEN_SIGNING_KEY": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte("k"), 32)),
 		"CENTRAL_CLIENTS": `[{"client_id":"sdk-web","peer_id":"peer-001","secret":"` +
 			strings.Repeat("s", 32) + `"}]`,
-		"CENTRAL_LISTEN_ADDR": "127.0.0.1:0",
+		"CENTRAL_LISTEN_ADDR":     "127.0.0.1:0",
+		"CENTRAL_ALLOWED_ORIGINS": "*",
 	}
 	for k, v := range overrides {
 		vars[k] = v

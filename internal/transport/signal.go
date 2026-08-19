@@ -43,9 +43,12 @@ type SignalDeps struct {
 	Hub *signaling.Hub
 	// Verifier checks the token offered in the subprotocol.
 	Verifier *auth.TokenVerifier
-	// AllowedOrigins are the browser origins that may connect. Empty allows any,
-	// which is only right in development.
+	// AllowedOrigins are the browser origins that may connect.
 	AllowedOrigins []string
+	// AllowAnyOrigin drops the origin check. It is separate from an empty
+	// AllowedOrigins on purpose: allowing everybody has to be something somebody
+	// asked for, not what happens when a setting is missing.
+	AllowAnyOrigin bool
 	// MaxMessageBytes bounds one message. Zero takes the default.
 	MaxMessageBytes int64
 	// PingInterval and PongTimeout are the connection-level heartbeat: a peer
@@ -99,11 +102,9 @@ func Signal(deps SignalDeps) http.Handler {
 		}
 
 		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-			Subprotocols:   []string{Subprotocol},
-			OriginPatterns: deps.AllowedOrigins,
-			// With no origins configured every origin is allowed, which is the
-			// development case and is refused in any deployment that sets them.
-			InsecureSkipVerify: len(deps.AllowedOrigins) == 0,
+			Subprotocols:       []string{Subprotocol},
+			OriginPatterns:     deps.AllowedOrigins,
+			InsecureSkipVerify: deps.AllowAnyOrigin,
 		})
 		if err != nil {
 			// Accept has already answered; the reason is ours to log.

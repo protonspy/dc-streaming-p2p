@@ -51,6 +51,13 @@ does not. The client offers `["dc-signal.v1", "dc-token." + token]` and the serv
 selects `dc-signal.v1`, which is the same shape everything from Kubernetes to
 managed WebSocket providers uses for this.
 
+**The origin decision is never a default.** With no origins configured the server
+refuses to start; allowing every origin is a value somebody wrote, and the server
+says so at startup with a warning. The token is the real defence against a page on
+another origin opening a channel, and the origin check is the second layer — a
+second layer that appears when a variable is set and vanishes when it is forgotten
+is not one.
+
 ## Data
 
 The hub holds one connection per peer:

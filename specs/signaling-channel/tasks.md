@@ -27,6 +27,9 @@ ci: wait
   _Depends 1.1_
 - [x] 2.2 (Unit) Refuse an origin that is not among the configured ones — R1.4
   _Depends 2.1_
+- [x] 2.6 (Unit) Refuse to start with no origins configured, and accept every origin only where that was asked for — R1.6
+  _Depends 2.2_
+  _Reason The security review found an unset value quietly allowing every origin_
 - [x] 2.3 (Unit) Keep a connected peer online in the registry, and close a channel that stops answering the heartbeat — R3.1, R3.2
   _Depends 2.1_
 - [x] 2.4 (Unit) Bound every write with a deadline, so a peer that stops reading cannot hold up the peer writing to it — R2.4

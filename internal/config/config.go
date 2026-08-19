@@ -29,7 +29,9 @@ type Config struct {
 	// ShutdownTimeout bounds how long a graceful shutdown waits for connections.
 	ShutdownTimeout time.Duration
 	// AllowedOrigins are the browser origins allowed to open a control-plane
-	// connection. Empty means every origin, which is only ever right in development.
+	// connection. AnyOrigin as the only entry allows every origin, which has to be
+	// asked for: an unset value refuses to start rather than quietly allowing
+	// everybody.
 	AllowedOrigins []string
 
 	// TokenSigningKey signs the tokens issued by POST /auth. Only this server
@@ -90,6 +92,11 @@ type Config struct {
 	// TURNCredentialTTL is how long an issued relay credential stays valid.
 	TURNCredentialTTL time.Duration
 }
+
+// AnyOrigin is the value that allows every origin. It exists so that the
+// permissive case is something an operator wrote down, rather than what happens
+// when nobody sets the variable.
+const AnyOrigin = "*"
 
 // SigningKeySeedLen is the length of the seed a signing key is configured as:
 // 32 random bytes, base64, which is what `openssl rand -base64 32` prints.
@@ -190,6 +197,11 @@ func (c Config) validate() []error {
 	if len(c.TokenSigningKey) != ed25519.PrivateKeySize {
 		problems = append(problems, fmt.Errorf("%sTOKEN_SIGNING_KEY: no usable signing key", Prefix))
 	}
+	if len(c.AllowedOrigins) == 0 {
+		problems = append(problems, fmt.Errorf(
+			"%sALLOWED_ORIGINS: not set — list the origins that may open a channel, or %q to allow any, which is development only",
+			Prefix, AnyOrigin))
+	}
 	if strings.TrimSpace(c.Issuer) == "" {
 		problems = append(problems, fmt.Errorf("%sISSUER: empty, and every token has to name who issued it", Prefix))
 	}
@@ -213,6 +225,11 @@ func (c Config) validate() []error {
 	}
 
 	return problems
+}
+
+// AnyOriginAllowed reports whether this configuration lets any origin connect.
+func (c Config) AnyOriginAllowed() bool {
+	return len(c.AllowedOrigins) == 1 && c.AllowedOrigins[0] == AnyOrigin
 }
 
 // RelayConfigured reports whether peers can be offered a relay at all. Without one,
@@ -291,8 +308,8 @@ func containsFold(values []string, want string) bool {
 // leaked signing key.
 func (c Config) String() string {
 	return fmt.Sprintf(
-		"listen=%s issuer=%s token_ttl=%s signing_key=%s clients=%d heartbeat=%s suspect=%s offline=%s negotiation=%s max_peers=%d expiry=%s stun=%d relay=%t turn_credential_ttl=%s",
-		c.ListenAddr, c.Issuer, c.TokenTTL, signingKeyState(c.TokenSigningKey), len(c.Clients), c.HeartbeatInterval,
+		"listen=%s origins=%d any_origin=%t issuer=%s token_ttl=%s signing_key=%s clients=%d heartbeat=%s suspect=%s offline=%s negotiation=%s max_peers=%d expiry=%s stun=%d relay=%t turn_credential_ttl=%s",
+		c.ListenAddr, len(c.AllowedOrigins), c.AnyOriginAllowed(), c.Issuer, c.TokenTTL, signingKeyState(c.TokenSigningKey), len(c.Clients), c.HeartbeatInterval,
 		c.SuspectAfter, c.OfflineAfter, c.NegotiationTimeout, c.MaxPeers, c.ExpiryInterval,
 		len(c.STUNURLs), c.RelayConfigured(), c.TURNCredentialTTL,
 	)

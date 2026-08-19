@@ -82,6 +82,12 @@ func run(ctx context.Context, args []string, getenv config.Getenv, stdout, stder
 		return err
 	}
 
+	if cfg.AnyOriginAllowed() {
+		logger.WarnContext(ctx, "every origin may open a signaling channel",
+			slog.String("setting", config.Prefix+"ALLOWED_ORIGINS"),
+		)
+	}
+
 	logger.InfoContext(ctx, "authentication ready",
 		slog.Int("clients", clients.Len()),
 		slog.String("key_id", transport.KeyID(issuer.PublicKey())),
@@ -225,13 +231,18 @@ func routes(
 	// The signaling channel authenticates itself: a browser cannot set headers on
 	// a WebSocket, so the token rides in the subprotocol and is verified before
 	// the upgrade.
-	mux.Handle("GET /signal", transport.Signal(transport.SignalDeps{
+	signalDeps := transport.SignalDeps{
 		Hub:             hub,
 		Verifier:        verifier,
-		AllowedOrigins:  cfg.AllowedOrigins,
 		MaxMessageBytes: cfg.MaxSignalMessageBytes,
 		Logger:          logger,
-	}))
+	}
+	if cfg.AnyOriginAllowed() {
+		signalDeps.AllowAnyOrigin = true
+	} else {
+		signalDeps.AllowedOrigins = cfg.AllowedOrigins
+	}
+	mux.Handle("GET /signal", transport.Signal(signalDeps))
 
 	return mux
 }

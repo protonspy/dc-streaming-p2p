@@ -21,8 +21,9 @@ registry should stop hearing from.
 - **R1.1** When an authenticated peer opens the signaling channel, the control plane shall accept the connection and shall register that peer.
 - **R1.2** If a connection presents no token, a token this server did not sign, or an expired one, then the control plane shall refuse the connection.
 - **R1.3** If a peer opens a second signaling channel while one is open, then the control plane shall close the older connection and keep the newer one.
-- **R1.4** Where allowed origins are configured, the control plane shall refuse a connection from an origin that is not among them.
+- **R1.4** The control plane shall refuse a connection from an origin that is not among the configured ones.
 - **R1.5** When a signaling channel closes, the control plane shall deregister that peer.
+- **R1.6** If no allowed origins are configured, then the server shall refuse to start, and shall accept every origin only where that was configured explicitly.
 
 ## R2 · Carrying the negotiation
 

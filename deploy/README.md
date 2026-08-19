@@ -29,6 +29,11 @@ themselves come from `CENTRAL_CLIENTS` as JSON, or from a file named by
 `CENTRAL_CLIENTS_FILE` — the file is the better one for anything real, because an
 environment variable is readable by anything that can list the process.
 
+`CENTRAL_ALLOWED_ORIGINS` has no default: the server refuses to start without it.
+The compose file sets `*` because a development page is served from wherever you
+happen to open it; a deployment lists the origins its own application is served
+from, and the server warns at startup whenever the wildcard is in use.
+
 This stack serves plain HTTP, which is why the Go client needs
 `WithInsecureTransport()` to talk to it. A deployment terminates TLS in front of the
 server: pinning the published key stops another server from impersonating this one,
